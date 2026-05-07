@@ -1,11 +1,7 @@
 from django.urls import path
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
+from .views import GoogleLoginView, CompleteProfileView
 
 urlpatterns = [
-    # This creates the door at: /api/auth/login/
-    path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('google-login/', GoogleLoginView.as_view(), name='google-login'),
+    path('complete-profile/', CompleteProfileView.as_view(), name='complete-profile'),
 ]

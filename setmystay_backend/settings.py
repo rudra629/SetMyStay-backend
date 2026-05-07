@@ -155,7 +155,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3001",
 ]
 CORS_ALLOW_CREDENTIALS = True
-AUTH_USER_MODEL = 'users.User'
+
 # Media Files (User Uploads)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
