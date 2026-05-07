@@ -23,7 +23,7 @@ class PropertySerializer(serializers.ModelSerializer):
         queryset=Amenity.objects.all(), many=True, write_only=True, source='amenities'
     )
     
-    owner_name = serializers.CharField(source='owner.username', read_only=True)
+    # ❌ (I completely removed the line that was hijacking your username!)
 
     class Meta:
         model = Property
@@ -33,7 +33,12 @@ class PropertySerializer(serializers.ModelSerializer):
             'city', 'area', 'address',
             'bhk', 'furnishing', 'sq_ft',
             'occupancy_type', 'gender_preference',
-            'images', 'amenities', 'amenity_ids', 'owner_name', 'created_at'
+            'sharing_status', 'is_broker', 
+            
+            # 👇 ADDED: The new contact fields from your model
+            'owner_name', 'phone_primary', 'phone_secondary',
+            
+            'images', 'amenities', 'amenity_ids', 'created_at'
         ]
 
 # 4. Roommate Profile Serializer

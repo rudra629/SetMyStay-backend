@@ -4,6 +4,7 @@ from .models import Property, ListingImage, RoommateProfile, Amenity # Ensure Li
 from .serializers import PropertySerializer, RoommateProfileSerializer, AmenitySerializer
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
+from rest_framework import generics
 
 class PropertyViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
@@ -62,3 +63,10 @@ class RoommateViewSet(viewsets.ModelViewSet):
 class AmenityViewSet(viewsets.ModelViewSet):
     queryset = Amenity.objects.all()
     serializer_class = AmenitySerializer
+
+class RoommateListView(generics.ListAPIView):
+    serializer_class = PropertySerializer
+    
+    def get_queryset(self):
+        # Only return approved ROOMMATE properties
+        return Property.objects.filter(property_type='ROOMMATE', status='APPROVED')
