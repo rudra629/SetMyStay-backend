@@ -12,12 +12,15 @@ class GoogleLoginView(APIView):
     def post(self, request):
         token = request.data.get('token')
         
+        print("====== DEBUGGING TOKEN ======")
+        print(f"Token received: {token}")
+        
         try:
             # Verify the token with Google
             idinfo = id_token.verify_oauth2_token(
                 token, 
                 google_requests.Request(), 
-                "YOUR_GOOGLE_CLIENT_ID" # TODO: Replace with your actual Google Client ID
+                "567107261238-gujakiaj292e4fm7kk5t74k15j1umgno.apps.googleusercontent.com" 
             )
 
             email = idinfo.get('email')
@@ -43,8 +46,14 @@ class GoogleLoginView(APIView):
                 'message': 'Login Successful'
             })
 
-        except ValueError:
-            return Response({'error': 'Invalid Google token'}, status=status.HTTP_400_BAD_REQUEST)
+        # Catch the specific Google Error and print it out
+        except ValueError as e:
+            print("====== GOOGLE VERIFICATION ERROR ======")
+            print(str(e))
+            print("=======================================")
+            
+            # Send the actual error to the frontend red box so we can read it easily
+            return Response({'error': f'Invalid Google token: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CompleteProfileView(APIView):

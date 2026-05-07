@@ -7,6 +7,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('listings.urls')),
     path('api/auth/', include('users.urls')),
+    path('api/users/', include('users.urls')),
 ]
 
 # 👇 This allows the browser to load images from your computer
