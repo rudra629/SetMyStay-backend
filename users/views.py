@@ -26,6 +26,7 @@ class GoogleLoginView(APIView):
             email = idinfo.get('email')
             first_name = idinfo.get('given_name', '')
             last_name = idinfo.get('family_name', '')
+            picture = idinfo.get('picture', '')
 
             if not email:
                 return Response({'error': 'Email not provided by Google'}, status=status.HTTP_400_BAD_REQUEST)
@@ -43,6 +44,8 @@ class GoogleLoginView(APIView):
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
                 'is_profile_complete': user.profile.is_profile_complete,
+                'picture': picture, # 👈 ADD THIS: Send it to React
+                'first_name': first_name, # 👈 ADD THIS: Send the name
                 'message': 'Login Successful'
             })
 
