@@ -76,6 +76,9 @@ class Property(models.Model):
     # Relationships
     amenities = models.ManyToManyField(Amenity, blank=True)
     
+    # fav
+    favorited_by = models.ManyToManyField(User, related_name='favorite_properties', blank=True)
+    
     # 🛡️ STAFF CONTROL
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)

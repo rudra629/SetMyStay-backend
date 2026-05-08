@@ -5,6 +5,8 @@ from .serializers import PropertySerializer, RoommateProfileSerializer, AmenityS
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 from rest_framework import generics
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 class PropertyViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
@@ -46,7 +48,17 @@ class PropertyViewSet(viewsets.ModelViewSet):
             
             # C. Create the Database Record linking Image -> Property
             ListingImage.objects.create(property=property_instance, image_url=full_image_url)
-
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def toggle_favorite(self, request, pk=None):
+        property_instance = self.get_object()
+        user = request.user
+        
+        if user in property_instance.favorited_by.all():
+            property_instance.favorited_by.remove(user)
+            return Response({'status': 'removed', 'message': 'Removed from favorites'})
+        else:
+            property_instance.favorited_by.add(user)
+            return Response({'status': 'added', 'message': 'Added to favorites'})
 class RoommateViewSet(viewsets.ModelViewSet):
 
     ordering = ['-id']
