@@ -51,6 +51,11 @@ class Property(models.Model):
     furnishing = models.CharField(max_length=20, blank=True) 
     sq_ft = models.IntegerField(null=True, blank=True)
     
+    #Docs
+    document_aadhaar = models.FileField(upload_to='verification_docs/', null=True, blank=True)
+    document_electricity = models.FileField(upload_to='verification_docs/', null=True, blank=True)
+    document_noc = models.FileField(upload_to='verification_docs/', null=True, blank=True) 
+
     # ----------------------------------------------------
     # TYPE-SPECIFIC FIELDS 
     # ----------------------------------------------------
@@ -78,7 +83,7 @@ class Property(models.Model):
     
     # fav
     favorited_by = models.ManyToManyField(User, related_name='favorite_properties', blank=True)
-    
+
     # 🛡️ STAFF CONTROL
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -117,3 +122,22 @@ class RoommateProfile(models.Model):
     
     def __str__(self):
         return f"Roommate: {self.user.username}"
+    
+class Coupon(models.Model):
+    code = models.CharField(max_length=20, unique=True)
+    discount_percentage = models.IntegerField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.code
+
+class Advertisement(models.Model):
+    title = models.CharField(max_length=200)
+    description = models.TextField()
+    image = models.ImageField(upload_to='advertisements/')
+    is_active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.title
