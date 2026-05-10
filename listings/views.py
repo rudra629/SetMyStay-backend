@@ -11,10 +11,7 @@ from .serializers import PropertySerializer, RoommateProfileSerializer, AmenityS
 
 class PropertyViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
-    
-    # 👇 FIX: Only ONE parser_classes definition, and it includes JSONParser!
     parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
-    
     serializer_class = PropertySerializer
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -22,35 +19,49 @@ class PropertyViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'area', 'description']
     ordering_fields = ['rent', 'created_at']
 
-    # 👇 Security: Admins can delete/edit, logged-in users can create, anyone can view
     def get_permissions(self):
         if self.action in ['destroy', 'update', 'partial_update']:
             return [permissions.IsAdminUser()] 
         return [permissions.IsAuthenticatedOrReadOnly()]
 
     def get_queryset(self):
-        # 👇 FIX 1: Only show all properties if explicitly requested by the admin panel
         is_admin_view = self.request.query_params.get('admin') == 'true'
         if self.request.user.is_staff and is_admin_view:
             return Property.objects.all()
-            
-        # Otherwise, everyone (even staff on the home page) only sees APPROVED
         return Property.objects.filter(status='APPROVED')
 
+    # 👇 THIS IS THE MAGIC FUNCTION THAT SAVES AMENITIES AND IMAGES
     def perform_create(self, serializer):
+        # 1. Save main data
         property_instance = serializer.save(owner=self.request.user)
         
+        # 2. Save Images to Cloud/Local
         images = self.request.FILES.getlist('uploaded_images')
         for image in images:
             file_path = default_storage.save(f'property_images/{image.name}', ContentFile(image.read()))
-            full_image_url = f"{self.request.scheme}://{self.request.get_host()}/media/{file_path}"
-            ListingImage.objects.create(property=property_instance, image_url=full_image_url)
+            # 👇 CLOUD FIX: This automatically gets the S3 URL (or local URL if no S3 keys are set)
+            full_image_url = default_storage.url(file_path)
+            ListingImage.objects.create(property=property_instance, image_url=full_image_url, is_video=False)
+
+        # 3. 👇 NEW: Catch and Save Video to Cloud 👇
+        video_file = self.request.FILES.get('uploaded_video')
+        if video_file:
+            video_path = default_storage.save(f'property_videos/{video_file.name}', ContentFile(video_file.read()))
+            full_video_url = default_storage.url(video_path)
+            ListingImage.objects.create(property=property_instance, image_url=full_video_url, is_video=True)
+
+        # 4. Save Amenities
+        amenities_str = self.request.data.get('amenities_list', '')
+        if amenities_str:
+            amenity_names = [a.strip() for a in amenities_str.split(',') if a.strip()]
+            for name in amenity_names:
+                amenity_obj, created = Amenity.objects.get_or_create(name=name)
+                property_instance.amenities.add(amenity_obj)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def toggle_favorite(self, request, pk=None):
         property_instance = self.get_object()
         user = request.user
-        
         if user in property_instance.favorited_by.all():
             property_instance.favorited_by.remove(user)
             return Response({'status': 'removed', 'message': 'Removed from favorites'})
@@ -58,26 +69,21 @@ class PropertyViewSet(viewsets.ModelViewSet):
             property_instance.favorited_by.add(user)
             return Response({'status': 'added', 'message': 'Added to favorites'})
 
-    # 👇 ADMIN FIX: Approve/Reject Properties
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def update_status(self, request, pk=None):
-        # Manually check staff status for better error handling
         if not request.user.is_staff:
             return Response({'error': 'Only admins can update status'}, status=status.HTTP_403_FORBIDDEN)
             
         property_instance = self.get_object()
         new_status = request.data.get('status')
-        
         valid_statuses = ['APPROVED', 'REJECTED', 'PENDING']
+        
         if new_status not in valid_statuses:
             return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
         
         property_instance.status = new_status
         property_instance.save()
-        
         return Response({'status': 'success', 'message': f'Property {new_status.lower()} successfully'})
-
-
 class RoommateViewSet(viewsets.ModelViewSet):
     ordering = ['-id']
     queryset = RoommateProfile.objects.filter(status='APPROVED')

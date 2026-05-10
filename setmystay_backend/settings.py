@@ -13,7 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 import os
-
+from google.oauth2 import service_account
 
 
 SIMPLE_JWT = {
@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'listings',
     'management',
     'interactions',
+    'storages',
     
 ]
 # REST Framework Configuration
@@ -157,5 +158,29 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = True
 
 # Media Files (User Uploads)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# MEDIA_URL = '/media/'
+# MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# --- GOOGLE CLOUD STORAGE CONFIGURATION ---
+
+# 1. The name of the bucket you just created
+GS_BUCKET_NAME = 'setmystay-media-bucket-2026' # Put YOUR exact bucket name here
+
+# 2. Point Django to that JSON file you downloaded
+# BASE_DIR is the folder where manage.py lives
+GS_CREDENTIALS_FILE = os.path.join(BASE_DIR, 'gcs-keys.json') 
+GS_DEFAULT_ACL = None
+# 3. Load the credentials
+GS_CREDENTIALS = service_account.Credentials.from_service_account_file(GS_CREDENTIALS_FILE)
+
+# 4. Tell Django to use GCS instead of your hard drive
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+# 5. Tell Django what the public URL looks like so it sends the right link to Next.js
+MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
