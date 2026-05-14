@@ -183,4 +183,4 @@ STORAGES = {
 }
 
 # 5. Tell Django what the public URL looks like so it sends the right link to Next.js
-MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
+MEDIA_URL = f'https://storage.googleapis.com//'
