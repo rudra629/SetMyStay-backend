@@ -14,7 +14,13 @@ from pathlib import Path
 from datetime import timedelta
 import os
 from google.oauth2 import service_account
+from dotenv import load_dotenv
 
+load_dotenv()
+
+RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
+RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
+RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET')
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),

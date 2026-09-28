@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Property, Amenity, ListingImage, RoommateProfile, Coupon, Advertisement # Make sure to import them!
 from django.contrib.auth.models import User
+from .models import Purchase
 # 1. Image Serializer
 class ListingImageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -92,3 +93,10 @@ class StaffSerializer(serializers.ModelSerializer):
             instance.set_password(password) # Safely hash new password
         instance.save()
         return instance
+class PurchaseSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.first_name', default='User', read_only=True)
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+
+    class Meta:
+        model = Purchase
+        fields = ['id', 'user_name', 'user_email', 'plan_name', 'amount', 'razorpay_payment_id', 'status', 'created_at']
