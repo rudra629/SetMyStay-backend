@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import CreateRazorpayOrderView, RazorpayWebhookView
+from .views import CreateRazorpayOrderView, RazorpayWebhookView, VerifyLocalPaymentView
 router = DefaultRouter()
 router.register(r'properties', views.PropertyViewSet, basename='property')
 router.register(r'roommates', views.RoommateViewSet, basename='roommate')
@@ -22,4 +22,5 @@ urlpatterns = [
     path('payments/webhook/', RazorpayWebhookView.as_view(), name='razorpay-webhook'),
     path('payments/my-history/', views.MyPurchasesView.as_view(), name='my-purchases'),
     path('payments/all-history/', views.AllPurchasesAdminView.as_view(), name='all-purchases'),
+    path('payments/verify-local/', VerifyLocalPaymentView.as_view(), name='verify-local'),
 ]

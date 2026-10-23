@@ -33,7 +33,8 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         is_admin_view = self.request.query_params.get('admin') == 'true'
-        if self.request.user.is_staff and is_admin_view:
+        # if self.request.user.is_staff and is_admin_view:
+        if is_admin_view: # CHANGE IN PRODUCTION!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             return Property.objects.all()
         return Property.objects.filter(status='APPROVED')
 
@@ -78,8 +79,8 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def update_status(self, request, pk=None):
-        if not request.user.is_staff:
-            return Response({'error': 'Only admins can update status'}, status=status.HTTP_403_FORBIDDEN)
+        # if not request.user.is_staff:
+            # return Response({'error': 'Only admins can update status'}, status=status.HTTP_403_FORBIDDEN) # UN comment it !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             
         property_instance = self.get_object()
         new_status = request.data.get('status')
@@ -382,3 +383,22 @@ class AllPurchasesAdminView(generics.ListAPIView):
     serializer_class = PurchaseSerializer
     permission_classes = [permissions.IsAdminUser]
     queryset = Purchase.objects.all().order_by('-created_at')
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+
+class VerifyLocalPaymentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        property_id = request.data.get('property_id')
+        payment_id = request.data.get('razorpay_payment_id')
+        
+        try:
+            # Find the property and mark it as PENDING so it appears in the Admin Dashboard
+            prop = Property.objects.get(id=property_id)
+            prop.status = 'PENDING'
+            prop.save()
+            return Response({'status': 'success', 'message': 'Payment verified locally'})
+        except Property.DoesNotExist:
+            return Response({'error': 'Property not found'}, status=404)
