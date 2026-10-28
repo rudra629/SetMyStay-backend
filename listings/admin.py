@@ -1,7 +1,11 @@
 from django.contrib import admin
 from .models import Property, Amenity, ListingImage, RoommateProfile
 
-# This allows you to upload images directly on the Property creation page!
+# Import the models from your management app
+from management.models import Coupon, Advertisement
+
+# --- LISTINGS APP MODELS ---
+
 class ListingImageInline(admin.TabularInline):
     model = ListingImage
     extra = 1
@@ -11,7 +15,7 @@ class PropertyAdmin(admin.ModelAdmin):
     list_display = ('title', 'property_type', 'rent', 'city', 'status')
     list_filter = ('status', 'property_type', 'city', 'is_broker')
     search_fields = ('title', 'area', 'city', 'owner_name')
-    list_editable = ('status',) # Lets you approve/reject directly from the list view
+    list_editable = ('status',) 
     inlines = [ListingImageInline]
 
 @admin.register(RoommateProfile)
@@ -25,3 +29,21 @@ class RoommateProfileAdmin(admin.ModelAdmin):
 class AmenityAdmin(admin.ModelAdmin):
     list_display = ('name',)
     search_fields = ('name',)
+
+admin.site.register(ListingImage)
+
+
+# --- MANAGEMENT APP MODELS ---
+
+@admin.register(Coupon)
+class CouponAdmin(admin.ModelAdmin):
+    list_display = ('code', 'discount_percentage', 'is_active', 'created_at')
+    list_filter = ('is_active', 'created_at')
+    search_fields = ('code',)
+    list_editable = ('is_active',)
+
+@admin.register(Advertisement)
+class AdvertisementAdmin(admin.ModelAdmin):
+    list_display = ('title', 'is_active', 'created_at')
+    list_filter = ('is_active',)
+    list_editable = ('is_active',)

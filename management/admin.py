@@ -1,12 +1,46 @@
 from django.contrib import admin
-from .models import Coupon, Advertisement 
+from .models import Property, Amenity, ListingImage, RoommateProfile
+
+# Import the models from your management app
+from management.models import Coupon, Advertisement
+
+# --- LISTINGS APP MODELS ---
+
+class ListingImageInline(admin.TabularInline):
+    model = ListingImage
+    extra = 1
+
+@admin.register(Property)
+class PropertyAdmin(admin.ModelAdmin):
+    list_display = ('title', 'property_type', 'rent', 'city', 'status')
+    list_filter = ('status', 'property_type', 'city', 'is_broker')
+    search_fields = ('title', 'area', 'city', 'owner_name')
+    list_editable = ('status',) 
+    inlines = [ListingImageInline]
+
+@admin.register(RoommateProfile)
+class RoommateProfileAdmin(admin.ModelAdmin):
+    list_display = ('user_name', 'location_preference', 'budget', 'status')
+    list_filter = ('status',)
+    search_fields = ('user_name', 'location_preference')
+    list_editable = ('status',)
+
+@admin.register(Amenity)
+class AmenityAdmin(admin.ModelAdmin):
+    list_display = ('name',)
+    search_fields = ('name',)
+
+admin.site.register(ListingImage)
+
+
+# --- MANAGEMENT APP MODELS ---
 
 @admin.register(Coupon)
 class CouponAdmin(admin.ModelAdmin):
     list_display = ('code', 'discount_percentage', 'is_active', 'created_at')
     list_filter = ('is_active', 'created_at')
     search_fields = ('code',)
-    list_editable = ('is_active',) # Quickly toggle coupons on/off for the slot machine
+    list_editable = ('is_active',)
 
 @admin.register(Advertisement)
 class AdvertisementAdmin(admin.ModelAdmin):
