@@ -17,12 +17,12 @@ class PropertyAdmin(admin.ModelAdmin):
     search_fields = ('title', 'area', 'city', 'owner_name')
     list_editable = ('status',) 
     inlines = [ListingImageInline]
-
 @admin.register(RoommateProfile)
 class RoommateProfileAdmin(admin.ModelAdmin):
-    list_display = ('user_name', 'location_preference', 'budget', 'status')
+    # Removed 'user_name' to prevent the crash. Added 'id' as a safe fallback.
+    list_display = ('id', 'location_preference', 'budget', 'status')
     list_filter = ('status',)
-    search_fields = ('user_name', 'location_preference')
+    search_fields = ('location_preference',)
     list_editable = ('status',)
 
 @admin.register(Amenity)
