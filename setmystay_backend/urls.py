@@ -10,6 +10,18 @@ urlpatterns = [
     path('api/users/', include('users.urls')),
 ]
 
-# 👇 This allows the browser to load images from your computer
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+
+# REMOVE THE BLOCK DURING FINAL PRODUCTION
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+try:
+    # Checks if an admin account already exists to prevent errors
+    if not User.objects.filter(username='admin').exists():
+        User.objects.create_superuser('admin', 'admin@setmystay.com', 'Admin@12345')
+        print("Superuser created automatically!")
+except Exception as e:
+    pass
