@@ -2,12 +2,14 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings # 👈 Import settings
 from django.conf.urls.static import static # 👈 Import static
-
+from . import views
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('listings.urls')),
     path('api/auth/', include('users.urls')),
     path('api/users/', include('users.urls')),
+    path('api/', include('management.urls')),
+    path('payments/verify-local/', views.verify_local_payment, name='verify_local_payment'),
 ]
 
 if settings.DEBUG:
