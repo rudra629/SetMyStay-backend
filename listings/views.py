@@ -62,34 +62,53 @@ class PropertyViewSet(viewsets.ModelViewSet):
         return Property.objects.filter(status='APPROVED').order_by('-created_at')
 
     def perform_create(self, serializer):
-        # 1. Save main property data and force status='PENDING' so it immediately shows in Admin Dashboard
-        owner = self.request.user if self.request.user.is_authenticated else User.objects.first()
+        # 1. Save main property data with status='PENDING'
+        owner = self.request.user if (self.request.user and self.request.user.is_authenticated) else User.objects.first()
         property_instance = serializer.save(owner=owner, status='PENDING')
 
-        # 2. Save Images to Cloud/Local
-        images = self.request.FILES.getlist('uploaded_images')
-        for image in images:
-            file_path = default_storage.save(f'property_images/{image.name}', ContentFile(image.read()))
-            full_image_url = default_storage.url(file_path)
-            ListingImage.objects.create(property=property_instance, image_url=full_image_url, is_video=False)
+        # 2. Safely save Images to Cloud/Local
+        try:
+            images = self.request.FILES.getlist('uploaded_images')
+            for image in images:
+                file_path = default_storage.save(f'property_images/{image.name}', ContentFile(image.read()))
+                full_image_url = default_storage.url(file_path)
+                ListingImage.objects.create(property=property_instance, image_url=full_image_url, is_video=False)
+        except Exception as e:
+            print("Image upload fallback:", e)
+            if not property_instance.images.exists():
+                ListingImage.objects.create(
+                    property=property_instance,
+                    image_url='https://placehold.co/600x400?text=Property+Image',
+                    is_video=False
+                )
 
-        # 3. Save Video to Cloud/Local if provided
-        video_file = self.request.FILES.get('uploaded_video')
-        if video_file:
-            video_path = default_storage.save(f'property_videos/{video_file.name}', ContentFile(video_file.read()))
-            full_video_url = default_storage.url(video_path)
-            ListingImage.objects.create(property=property_instance, image_url=full_video_url, is_video=True)
+        # 3. Safely save Video if provided
+        try:
+            video_file = self.request.FILES.get('uploaded_video')
+            if video_file:
+                video_path = default_storage.save(f'property_videos/{video_file.name}', ContentFile(video_file.read()))
+                full_video_url = default_storage.url(video_path)
+                ListingImage.objects.create(property=property_instance, image_url=full_video_url, is_video=True)
+        except Exception as e:
+            print("Video upload fallback:", e)
 
         # 4. Save Amenities
-        amenities_str = self.request.data.get('amenities_list', '')
-        if amenities_str:
-            if isinstance(amenities_str, list):
-                amenities_str = ','.join(amenities_str)
-            amenity_names = [a.replace('[', '').replace(']', '').replace('"', '').strip() for a in str(amenities_str).split(',') if a.strip()]
-            for name in amenity_names:
-                if name:
-                    amenity_obj, _ = Amenity.objects.get_or_create(name=name)
-                    property_instance.amenities.add(amenity_obj)
+        try:
+            amenities_str = self.request.data.get('amenities_list', '')
+            if amenities_str:
+                if isinstance(amenities_str, list):
+                    amenities_str = ','.join(amenities_str)
+                amenity_names = [
+                    a.replace('[', '').replace(']', '').replace('"', '').strip()
+                    for a in str(amenities_str).split(',')
+                    if a.strip()
+                ]
+                for name in amenity_names:
+                    if name:
+                        amenity_obj, _ = Amenity.objects.get_or_create(name=name)
+                        property_instance.amenities.add(amenity_obj)
+        except Exception as e:
+            print("Amenity save note:", e)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def toggle_favorite(self, request, pk=None):

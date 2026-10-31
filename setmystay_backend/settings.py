@@ -143,10 +143,10 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
 # --- GOOGLE CLOUD STORAGE & STORAGES (Django 5.2+) ---
+# --- GOOGLE CLOUD STORAGE & STORAGES (SAFE FALLBACK) ---
 GS_BUCKET_NAME = 'setmystay-media-bucket-2026'
 GS_DEFAULT_ACL = None
 
-# Check local root first, then Render's secret files directory (/etc/secrets/)
 LOCAL_GCS_PATH = os.path.join(BASE_DIR, 'gcs-keys.json')
 RENDER_GCS_PATH = '/etc/secrets/gcs-keys.json'
 
@@ -157,15 +157,24 @@ elif os.path.exists(RENDER_GCS_PATH):
 else:
     GS_CREDENTIALS = None
 
-STORAGES = {
-    "default": {
-        "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
-    },
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    },
-}
-
-MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
-
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+if GS_CREDENTIALS:
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
+else:
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
