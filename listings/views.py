@@ -187,14 +187,19 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def toggle_favorite(self, request, pk=None):
+        """Send {"liked": true/false} to set the exact state (safe to repeat); without it, flips the state."""
         property_instance = self.get_object()
         user = request.user
-        if user in property_instance.favorited_by.all():
-            property_instance.favorited_by.remove(user)
-            return Response({'status': 'removed', 'message': 'Removed from favorites'})
+        wanted = request.data.get('liked', None)
+        if wanted is None:
+            liked = not property_instance.favorited_by.filter(pk=user.pk).exists()
         else:
+            liked = str(wanted).lower() in ('true', '1', 'yes')
+        if liked:
             property_instance.favorited_by.add(user)
-            return Response({'status': 'added', 'message': 'Added to favorites'})
+        else:
+            property_instance.favorited_by.remove(user)
+        return Response({'status': 'added' if liked else 'removed', 'liked': liked})
 
     @action(detail=True, methods=['post'], permission_classes=[IsStaffOrAdmin])
     def update_status(self, request, pk=None):
@@ -796,3 +801,12 @@ class SiteContactView(APIView):
         data = {'email': email, 'phone': phone, 'address': address}
         PricingConfig.objects.update_or_create(key='site_contact', defaults={'pricing_data': data})
         return Response(data, status=status.HTTP_200_OK)
+
+
+class MyFavoritesView(APIView):
+    """IDs of the listings the logged-in user has liked (so likes survive logout / clearing cookies)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        ids = [str(i) for i in request.user.favorite_properties.values_list('id', flat=True)]
+        return Response({'ids': ids}, status=status.HTTP_200_OK)

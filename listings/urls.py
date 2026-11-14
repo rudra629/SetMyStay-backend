@@ -19,6 +19,7 @@ from .views import (
     ChangePasswordView,
     SwipesView,
     SiteContactView,
+    MyFavoritesView,
 )
 
 router = DefaultRouter()
@@ -31,6 +32,7 @@ router.register(r'advertisements', views.AdvertisementViewSet, basename='adverti
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('my-favorites/', MyFavoritesView.as_view(), name='my-favorites'),
     path('my-properties/', MyPropertiesView.as_view(), name='my-properties'),
     # Normal/staff login (refuses the main admin, who must use the 2-step admin login below)
     path('auth/login/', NoAdminTokenObtainPairView.as_view(), name='token_obtain_pair'),
