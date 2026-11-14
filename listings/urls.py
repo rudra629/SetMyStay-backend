@@ -14,6 +14,7 @@ from .views import (
     VerifyStaffView,
     UserUnlocksView,
     UnlockListingView,
+    MyPlanView,
 )
 
 router = DefaultRouter()
@@ -34,6 +35,7 @@ urlpatterns = [
     path('payments/my-history/', MyPurchasesView.as_view(), name='my-purchases'),
     path('payments/all-history/', AllPurchasesAdminView.as_view(), name='all-purchases'),
     path('payments/verify-local/', VerifyLocalPaymentView.as_view(), name='verify-local'),
+    path('payments/my-plan/', MyPlanView.as_view(), name='my-plan'),
     path('payments/my-unlocks/', UserUnlocksView.as_view(), name='my-unlocks'),
     path('payments/unlock-listing/', UnlockListingView.as_view(), name='unlock-listing'),
     path('pricing/', PricingConfigView.as_view(), name='pricing-config'),

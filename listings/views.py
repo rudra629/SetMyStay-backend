@@ -24,6 +24,7 @@ from .models import (
     PricingConfig,
     UserUnlock,
 )
+from .entitlements import get_entitlement, pricing_key_for_plan
 from .serializers import (
     PropertySerializer,
     RoommateProfileSerializer,
@@ -448,102 +449,89 @@ class RazorpayWebhookView(APIView):
 
 class VerifyLocalPaymentView(APIView):
     """
-    Handles verification right after Razorpay modal succeeds on the frontend.
-    Works for BOTH:
-    1) Property Listing Fee (updates property status to PENDING so Admin sees it)
-    2) Subscription / Unlock Plans (where property_id is None)
-    And records the Purchase in the database so Purchase History works!
+    Called right after the Razorpay popup succeeds.
+    - Checks the Razorpay signature (so nobody can fake a payment).
+    - Uses the amount Razorpay actually charged, not what the browser says.
+    - Saves the Purchase against the logged-in user. Unlock credits / Ultimate
+      are then calculated from these Purchase rows (see entitlements.py).
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        user = request.user
         property_id = request.data.get('property_id')
-        payment_id = request.data.get('razorpay_payment_id') or f"pay_{int(timezone.now().timestamp())}"
+        payment_id = (request.data.get('razorpay_payment_id') or '').strip()
+        order_id = (request.data.get('razorpay_order_id') or '').strip()
+        signature = (request.data.get('razorpay_signature') or '').strip()
         plan_name = request.data.get('plan_name') or ('Property Listing Fee' if property_id else 'Subscription Plan')
-        amount = request.data.get('amount') or 499
 
-        # 1. If property_id is provided, mark that property as PENDING for Admin approval
+        if not (payment_id and order_id and signature):
+            return Response({'error': 'Missing Razorpay payment details'}, status=status.HTTP_400_BAD_REQUEST)
+
+        client = get_razorpay_client()
+        try:
+            client.utility.verify_payment_signature({
+                'razorpay_order_id': order_id,
+                'razorpay_payment_id': payment_id,
+                'razorpay_signature': signature,
+            })
+        except Exception:
+            return Response({'error': 'Payment signature is invalid'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Amount actually paid, from Razorpay (paise -> rupees)
+        try:
+            order = client.order.fetch(order_id)
+            paid_amount = (order.get('amount_paid') or order.get('amount') or 0) / 100
+        except Exception:
+            paid_amount = float(request.data.get('amount') or 0)
+
+        # Unlock plans: make sure the price paid matches the plan (allowing the best active coupon)
+        pricing_key = pricing_key_for_plan(plan_name)
+        if pricing_key:
+            cfg = PricingConfig.objects.filter(key='global_pricing').first()
+            prices = (cfg.pricing_data if cfg and cfg.pricing_data else DEFAULT_PRICING).get('unlocks', {})
+            full_price = float(prices.get(pricing_key) or DEFAULT_PRICING['unlocks'][pricing_key])
+            best_coupon = Coupon.objects.filter(is_active=True).order_by('-discount_percentage').first()
+            discount = (best_coupon.discount_percentage if best_coupon else 0) / 100
+            if paid_amount + 1 < full_price * (1 - discount):
+                return Response({'error': 'Amount paid does not match the plan price'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Property listing fee: send the property for admin approval
         if property_id:
-            prop = Property.objects.filter(id=property_id).first()
-            if prop:
+            prop = Property.objects.filter(id=property_id, owner=user).first()
+            if prop and prop.status not in ['APPROVED', 'REJECTED']:
                 prop.status = 'PENDING'
                 prop.save()
-        else:
-            # Fallback: if the user just created a property seconds ago and property_id wasn't passed,
-            # ensure their latest property is set to PENDING
-            if request.user and request.user.is_authenticated and 'listing' in str(plan_name).lower():
-                latest_prop = Property.objects.filter(owner=request.user).order_by('-created_at').first()
-                if latest_prop and latest_prop.status not in ['APPROVED', 'REJECTED']:
-                    latest_prop.status = 'PENDING'
-                    latest_prop.save()
+        elif 'listing' in str(plan_name).lower():
+            latest_prop = Property.objects.filter(owner=user).order_by('-created_at').first()
+            if latest_prop and latest_prop.status not in ['APPROVED', 'REJECTED']:
+                latest_prop.status = 'PENDING'
+                latest_prop.save()
 
-        # 2. Save the Purchase record so it shows up in User & Admin Purchase History
-        try:
-            user = request.user if (request.user and request.user.is_authenticated) else None
-            email = (request.data.get('email') or request.data.get('user_email') or '').strip()
-            raw_name = (request.data.get('user_name') or request.data.get('name') or '').strip()
-
-            if not user and email:
-                user = User.objects.filter(email__iexact=email).first() or User.objects.filter(username__iexact=email).first()
-                if not user:
-                    user_name = raw_name or email.split('@')[0]
-                    first_name = user_name.split()[0] if user_name else 'User'
-                    last_name = " ".join(user_name.split()[1:]) if len(user_name.split()) > 1 else ''
-                    user, _ = User.objects.get_or_create(
-                        username=email,
-                        defaults={
-                            'email': email,
-                            'first_name': first_name,
-                            'last_name': last_name
-                        }
-                    )
-
-            if not user:
-                # Do NOT assign to User.objects.first() (which causes all payments to dump into Viraj Rajput).
-                # Instead create an identified customer record based on payment details.
-                customer_name = raw_name or 'Customer'
-                payment_suffix = payment_id.split('_')[-1] if '_' in payment_id else str(int(timezone.now().timestamp()))
-                user, _ = User.objects.get_or_create(
-                    username=f"cust_{payment_suffix}",
-                    defaults={
-                        'email': email,
-                        'first_name': customer_name
-                    }
-                )
-
-            if user:
-                Purchase.objects.get_or_create(
-                    razorpay_payment_id=payment_id,
-                    defaults={
-                        'user': user,
-                        'plan_name': plan_name,
-                        'amount': amount,
-                        'status': 'SUCCESS',
-                    }
-                )
-        except Exception as e:
-            print("Purchase save note:", e)
+        Purchase.objects.get_or_create(
+            razorpay_payment_id=payment_id,
+            defaults={
+                'user': user,
+                'plan_name': plan_name,
+                'amount': paid_amount,
+                'status': 'SUCCESS',
+            }
+        )
 
         return Response({
             'status': 'success',
-            'message': 'Payment verified and recorded successfully'
+            'message': 'Payment verified and recorded successfully',
+            'plan': get_entitlement(user),
         }, status=status.HTTP_200_OK)
 
 
 class MyPurchasesView(generics.ListAPIView):
+    """Purchases of the logged-in user only (no more lookup by email)."""
     serializer_class = PurchaseSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        if self.request.user and self.request.user.is_authenticated:
-            return Purchase.objects.filter(user=self.request.user).order_by('-created_at')
-        email = (self.request.query_params.get('email') or '').strip()
-        if email:
-            user = User.objects.filter(email__iexact=email).first() or User.objects.filter(username__iexact=email).first()
-            if user:
-                return Purchase.objects.filter(user=user).order_by('-created_at')
-            return Purchase.objects.none()
-        return Purchase.objects.none()
+        return Purchase.objects.filter(user=self.request.user).order_by('-created_at')
 
 
 class AllPurchasesAdminView(generics.ListAPIView):
@@ -552,54 +540,45 @@ class AllPurchasesAdminView(generics.ListAPIView):
     queryset = Purchase.objects.all().order_by('-created_at')
 
 
-class UserUnlocksView(APIView):
-    """Returns the list of listing IDs unlocked by the current user."""
-    permission_classes = [permissions.AllowAny]
+class MyPlanView(APIView):
+    """Everything the site needs after login: credits left, Ultimate status, unlocked listings."""
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        user = request.user if (request.user and request.user.is_authenticated) else None
-        email = (request.query_params.get('email') or '').strip()
-        if not user and email:
-            user = User.objects.filter(email__iexact=email).first() or User.objects.filter(username__iexact=email).first()
+        return Response(get_entitlement(request.user), status=status.HTTP_200_OK)
 
-        if not user:
-            return Response({'unlocked_ids': []}, status=status.HTTP_200_OK)
 
-        unlocked_ids = list(UserUnlock.objects.filter(user=user).values_list('property_id', flat=True))
-        return Response({'unlocked_ids': unlocked_ids}, status=status.HTTP_200_OK)
+class UserUnlocksView(APIView):
+    """Returns the list of listing IDs unlocked by the logged-in user."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        ids = list(UserUnlock.objects.filter(user=request.user).values_list('property_id', flat=True))
+        return Response({'unlocked_ids': ids}, status=status.HTTP_200_OK)
 
 
 class UnlockListingView(APIView):
-    """Records an unlocked listing for the user in the database."""
-    permission_classes = [permissions.AllowAny]
+    """Unlocks a listing for the logged-in user, using 1 credit unless Ultimate is active."""
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        user = request.user
         property_id = str(request.data.get('property_id') or '').strip()
         if not property_id:
             return Response({'error': 'property_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = request.user if (request.user and request.user.is_authenticated) else None
-        email = (request.data.get('email') or request.data.get('user_email') or '').strip()
-        raw_name = (request.data.get('user_name') or '').strip()
+        if UserUnlock.objects.filter(user=user, property_id=property_id).exists():
+            return Response({'status': 'already_unlocked', 'plan': get_entitlement(user)}, status=status.HTTP_200_OK)
 
-        if not user and email:
-            user = User.objects.filter(email__iexact=email).first() or User.objects.filter(username__iexact=email).first()
-            if not user:
-                user_name = raw_name or email.split('@')[0]
-                first_name = user_name.split()[0] if user_name else 'User'
-                last_name = " ".join(user_name.split()[1:]) if len(user_name.split()) > 1 else ''
-                user, _ = User.objects.get_or_create(
-                    username=email,
-                    defaults={'email': email, 'first_name': first_name, 'last_name': last_name}
-                )
-
-        if not user:
-            return Response({'status': 'ok', 'note': 'Anonymous unlock', 'unlocked_ids': [property_id]}, status=status.HTTP_200_OK)
+        plan = get_entitlement(user)
+        if not plan['is_unlimited'] and plan['credits_left'] <= 0:
+            return Response({'error': 'No unlock credits left. Please buy a plan.', 'plan': plan},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
 
         UserUnlock.objects.get_or_create(user=user, property_id=property_id)
-        all_unlocked = list(UserUnlock.objects.filter(user=user).values_list('property_id', flat=True))
-        return Response({'status': 'success', 'unlocked_ids': all_unlocked}, status=status.HTTP_200_OK)
-
+        plan = get_entitlement(user)
+        return Response({'status': 'success', 'unlocked_ids': plan['unlocked_ids'], 'plan': plan},
+                        status=status.HTTP_200_OK)
 
 
 DEFAULT_PRICING = {
