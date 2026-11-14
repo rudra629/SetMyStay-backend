@@ -22,6 +22,7 @@ from .models import (
     Advertisement,
     Purchase,
     PricingConfig,
+    UserUnlock,
 )
 from .serializers import (
     PropertySerializer,
@@ -479,12 +480,36 @@ class VerifyLocalPaymentView(APIView):
         # 2. Save the Purchase record so it shows up in User & Admin Purchase History
         try:
             user = request.user if (request.user and request.user.is_authenticated) else None
+            email = (request.data.get('email') or request.data.get('user_email') or '').strip()
+            raw_name = (request.data.get('user_name') or request.data.get('name') or '').strip()
+
+            if not user and email:
+                user = User.objects.filter(email__iexact=email).first() or User.objects.filter(username__iexact=email).first()
+                if not user:
+                    user_name = raw_name or email.split('@')[0]
+                    first_name = user_name.split()[0] if user_name else 'User'
+                    last_name = " ".join(user_name.split()[1:]) if len(user_name.split()) > 1 else ''
+                    user, _ = User.objects.get_or_create(
+                        username=email,
+                        defaults={
+                            'email': email,
+                            'first_name': first_name,
+                            'last_name': last_name
+                        }
+                    )
+
             if not user:
-                email = request.data.get('email') or request.data.get('user_email')
-                if email:
-                    user = User.objects.filter(email=email).first() or User.objects.filter(username=email).first()
-            if not user:
-                user = User.objects.first()
+                # Do NOT assign to User.objects.first() (which causes all payments to dump into Viraj Rajput).
+                # Instead create an identified customer record based on payment details.
+                customer_name = raw_name or 'Customer'
+                payment_suffix = payment_id.split('_')[-1] if '_' in payment_id else str(int(timezone.now().timestamp()))
+                user, _ = User.objects.get_or_create(
+                    username=f"cust_{payment_suffix}",
+                    defaults={
+                        'email': email,
+                        'first_name': customer_name
+                    }
+                )
 
             if user:
                 Purchase.objects.get_or_create(
@@ -512,18 +537,69 @@ class MyPurchasesView(generics.ListAPIView):
     def get_queryset(self):
         if self.request.user and self.request.user.is_authenticated:
             return Purchase.objects.filter(user=self.request.user).order_by('-created_at')
-        email = self.request.query_params.get('email')
+        email = (self.request.query_params.get('email') or '').strip()
         if email:
-            user = User.objects.filter(email=email).first() or User.objects.filter(username=email).first()
+            user = User.objects.filter(email__iexact=email).first() or User.objects.filter(username__iexact=email).first()
             if user:
                 return Purchase.objects.filter(user=user).order_by('-created_at')
-        return Purchase.objects.all().order_by('-created_at')[:25]
+            return Purchase.objects.none()
+        return Purchase.objects.none()
 
 
 class AllPurchasesAdminView(generics.ListAPIView):
     serializer_class = PurchaseSerializer
     permission_classes = [permissions.AllowAny]
     queryset = Purchase.objects.all().order_by('-created_at')
+
+
+class UserUnlocksView(APIView):
+    """Returns the list of listing IDs unlocked by the current user."""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        user = request.user if (request.user and request.user.is_authenticated) else None
+        email = (request.query_params.get('email') or '').strip()
+        if not user and email:
+            user = User.objects.filter(email__iexact=email).first() or User.objects.filter(username__iexact=email).first()
+
+        if not user:
+            return Response({'unlocked_ids': []}, status=status.HTTP_200_OK)
+
+        unlocked_ids = list(UserUnlock.objects.filter(user=user).values_list('property_id', flat=True))
+        return Response({'unlocked_ids': unlocked_ids}, status=status.HTTP_200_OK)
+
+
+class UnlockListingView(APIView):
+    """Records an unlocked listing for the user in the database."""
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        property_id = str(request.data.get('property_id') or '').strip()
+        if not property_id:
+            return Response({'error': 'property_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user if (request.user and request.user.is_authenticated) else None
+        email = (request.data.get('email') or request.data.get('user_email') or '').strip()
+        raw_name = (request.data.get('user_name') or '').strip()
+
+        if not user and email:
+            user = User.objects.filter(email__iexact=email).first() or User.objects.filter(username__iexact=email).first()
+            if not user:
+                user_name = raw_name or email.split('@')[0]
+                first_name = user_name.split()[0] if user_name else 'User'
+                last_name = " ".join(user_name.split()[1:]) if len(user_name.split()) > 1 else ''
+                user, _ = User.objects.get_or_create(
+                    username=email,
+                    defaults={'email': email, 'first_name': first_name, 'last_name': last_name}
+                )
+
+        if not user:
+            return Response({'status': 'ok', 'note': 'Anonymous unlock', 'unlocked_ids': [property_id]}, status=status.HTTP_200_OK)
+
+        UserUnlock.objects.get_or_create(user=user, property_id=property_id)
+        all_unlocked = list(UserUnlock.objects.filter(user=user).values_list('property_id', flat=True))
+        return Response({'status': 'success', 'unlocked_ids': all_unlocked}, status=status.HTTP_200_OK)
+
 
 
 DEFAULT_PRICING = {

@@ -94,9 +94,25 @@ class StaffSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 class PurchaseSerializer(serializers.ModelSerializer):
-    user_name = serializers.CharField(source='user.first_name', default='User', read_only=True)
-    user_email = serializers.EmailField(source='user.email', read_only=True)
+    user_name = serializers.SerializerMethodField()
+    user_email = serializers.SerializerMethodField()
 
     class Meta:
         model = Purchase
         fields = ['id', 'user_name', 'user_email', 'plan_name', 'amount', 'razorpay_payment_id', 'status', 'created_at']
+
+    def get_user_name(self, obj):
+        if obj.user:
+            full = f"{obj.user.first_name} {obj.user.last_name}".strip()
+            if full:
+                return full
+            if obj.user.username:
+                return obj.user.username
+        return 'Customer'
+
+    def get_user_email(self, obj):
+        if obj.user and obj.user.email:
+            return obj.user.email
+        if obj.user and '@' in obj.user.username:
+            return obj.user.username
+        return ''

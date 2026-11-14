@@ -170,3 +170,15 @@ class PricingConfig(models.Model):
 
     def __str__(self):
         return f"PricingConfig ({self.key})"
+
+
+class UserUnlock(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='unlocked_properties')
+    property_id = models.CharField(max_length=100)
+    unlocked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'property_id')
+
+    def __str__(self):
+        return f"{self.user.username} unlocked {self.property_id}"

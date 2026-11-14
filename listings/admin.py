@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Property, Amenity, ListingImage, RoommateProfile, Coupon, Advertisement, Purchase
+from .models import Property, Amenity, ListingImage, RoommateProfile, Coupon, Advertisement, Purchase, UserUnlock
 
 class ListingImageInline(admin.TabularInline):
     model = ListingImage
@@ -34,6 +34,11 @@ class AdvertisementAdmin(admin.ModelAdmin):
 class PurchaseAdmin(admin.ModelAdmin):
     list_display = ('plan_name', 'amount', 'razorpay_payment_id', 'status', 'created_at')
     list_filter = ('status',)
+
+@admin.register(UserUnlock)
+class UserUnlockAdmin(admin.ModelAdmin):
+    list_display = ('user', 'property_id', 'unlocked_at')
+    search_fields = ('user__email', 'user__username', 'property_id')
 
 admin.site.register(Amenity)
 admin.site.register(ListingImage)
