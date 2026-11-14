@@ -15,6 +15,7 @@ from .views import (
     UserUnlocksView,
     UnlockListingView,
     MyPlanView,
+    ChangePasswordView,
 )
 
 router = DefaultRouter()
@@ -39,6 +40,7 @@ urlpatterns = [
     path('payments/my-unlocks/', UserUnlocksView.as_view(), name='my-unlocks'),
     path('payments/unlock-listing/', UnlockListingView.as_view(), name='unlock-listing'),
     path('pricing/', PricingConfigView.as_view(), name='pricing-config'),
+    path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('auth/verify-admin/', VerifyAdminView.as_view(), name='verify-admin'),
     path('auth/verify-staff/', VerifyStaffView.as_view(), name='verify-staff'),
 ]

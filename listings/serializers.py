@@ -42,6 +42,39 @@ class PropertySerializer(serializers.ModelSerializer):
             'images', 'amenities', 'amenity_ids', 'created_at'
         ]
 
+    # Contact details are only sent to: the owner, staff/admin, or a user who unlocked it.
+    # Verification documents are only sent to the owner and staff/admin.
+    CONTACT_FIELDS = ('phone_primary', 'phone_secondary', 'address', 'vendor_number')
+    DOCUMENT_FIELDS = ('document_aadhaar', 'document_electricity', 'document_noc')
+
+    def _unlocked_ids(self, request):
+        cached = getattr(request, '_setmystay_unlocked_ids', None)
+        if cached is None:
+            from .models import UserUnlock
+            user = getattr(request, 'user', None)
+            if user and user.is_authenticated:
+                cached = set(UserUnlock.objects.filter(user=user).values_list('property_id', flat=True))
+            else:
+                cached = set()
+            request._setmystay_unlocked_ids = cached
+        return cached
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        logged_in = bool(user and user.is_authenticated)
+        is_staff = logged_in and (user.is_staff or user.is_superuser)
+        is_owner = logged_in and instance.owner_id == user.id
+        if is_staff or is_owner:
+            return data
+        for f in self.DOCUMENT_FIELDS:
+            data[f] = None
+        if not (request and str(instance.id) in self._unlocked_ids(request)):
+            for f in self.CONTACT_FIELDS:
+                data[f] = None
+        return data
+
 # 4. Roommate Profile Serializer
 class RoommateProfileSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source='user.username', read_only=True)

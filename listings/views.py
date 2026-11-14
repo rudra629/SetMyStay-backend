@@ -24,6 +24,9 @@ from .models import (
     PricingConfig,
     UserUnlock,
 )
+from .permissions import (
+    IsStaffOrAdmin, IsSuperAdmin, ReadOnlyOrSuperAdmin, ReadOnlyOrStaff, IsOwnerOrStaff, is_staff_user,
+)
 from .entitlements import get_entitlement, pricing_key_for_plan
 from .serializers import (
     PropertySerializer,
@@ -34,6 +37,17 @@ from .serializers import (
     PurchaseSerializer,
     StaffSerializer,
 )
+
+
+def minimum_plan_price(plan_name):
+    """Lowest valid price for an unlock plan: admin price minus the best active coupon."""
+    key = pricing_key_for_plan(plan_name)
+    cfg = PricingConfig.objects.filter(key='global_pricing').first()
+    prices = (cfg.pricing_data if cfg and cfg.pricing_data else DEFAULT_PRICING).get('unlocks', {})
+    full_price = float(prices.get(key) or DEFAULT_PRICING['unlocks'][key])
+    best_coupon = Coupon.objects.filter(is_active=True).order_by('-discount_percentage').first()
+    discount = min(max((best_coupon.discount_percentage if best_coupon else 0), 0), 90) / 100
+    return full_price * (1 - discount)
 
 
 def get_razorpay_client():
@@ -52,7 +66,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ['destroy', 'update', 'partial_update']:
-            return [permissions.AllowAny()]
+            return [IsOwnerOrStaff()]
         return [permissions.IsAuthenticatedOrReadOnly()]
 
     def get_queryset(self):
@@ -61,15 +75,21 @@ class PropertyViewSet(viewsets.ModelViewSet):
             return Property.objects.all().order_by('-created_at')
 
         is_admin_view = self.request.query_params.get('admin') == 'true'
-        if is_admin_view:
+        if is_admin_view and is_staff_user(self.request.user):
             return Property.objects.all().order_by('-created_at')
 
         return Property.objects.filter(status='APPROVED').order_by('-created_at')
 
+    def retrieve(self, request, *args, **kwargs):
+        # Non-approved listings are only visible to their owner and staff
+        instance = self.get_object()
+        if instance.status != 'APPROVED' and not is_staff_user(request.user) and instance.owner_id != getattr(request.user, 'id', None):
+            return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(instance).data)
+
     def perform_create(self, serializer):
         # 1. Save main property data with status='PENDING'
-        owner = self.request.user if (self.request.user and self.request.user.is_authenticated) else User.objects.first()
-        property_instance = serializer.save(owner=owner, status='PENDING')
+        property_instance = serializer.save(owner=self.request.user, status='PENDING')
 
         # 2. Upload images to Cloudinary (with fallback to default storage)
         images = self.request.FILES.getlist('uploaded_images')
@@ -174,7 +194,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
             property_instance.favorited_by.add(user)
             return Response({'status': 'added', 'message': 'Added to favorites'})
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.AllowAny])
+    @action(detail=True, methods=['post'], permission_classes=[IsStaffOrAdmin])
     def update_status(self, request, pk=None):
         property_instance = Property.objects.filter(pk=pk).first()
         if not property_instance:
@@ -203,7 +223,11 @@ class PropertyViewSet(viewsets.ModelViewSet):
 class RoommateViewSet(viewsets.ModelViewSet):
     ordering = ['-id']
     serializer_class = RoommateProfileSerializer
-    permission_classes = [permissions.AllowAny]
+
+    def get_permissions(self):
+        if self.action in ['destroy', 'update', 'partial_update']:
+            return [IsOwnerOrStaff()]
+        return [permissions.IsAuthenticatedOrReadOnly()]
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['location_preference', 'is_smoker', 'has_pets']
@@ -212,15 +236,14 @@ class RoommateViewSet(viewsets.ModelViewSet):
         if self.action in ['update_status', 'destroy', 'retrieve', 'update', 'partial_update']:
             return RoommateProfile.objects.all().order_by('-id')
         is_admin_view = self.request.query_params.get('admin') == 'true'
-        if is_admin_view:
+        if is_admin_view and is_staff_user(self.request.user):
             return RoommateProfile.objects.all().order_by('-id')
-        return RoommateProfile.objects.all().order_by('-id')
+        return RoommateProfile.objects.filter(status='APPROVED').order_by('-id')
 
     def perform_create(self, serializer):
-        user = self.request.user if self.request.user.is_authenticated else User.objects.first()
-        serializer.save(user=user, status='PENDING')
+        serializer.save(user=self.request.user, status='PENDING')
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.AllowAny])
+    @action(detail=True, methods=['post'], permission_classes=[IsStaffOrAdmin])
     def update_status(self, request, pk=None):
         profile = RoommateProfile.objects.filter(pk=pk).first()
         if not profile:
@@ -243,7 +266,7 @@ class RoommateViewSet(viewsets.ModelViewSet):
 class AmenityViewSet(viewsets.ModelViewSet):
     queryset = Amenity.objects.all()
     serializer_class = AmenitySerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [ReadOnlyOrStaff]
 
 
 class RoommateListView(generics.ListAPIView):
@@ -265,14 +288,14 @@ class MyPropertiesView(generics.ListAPIView):
 class CouponViewSet(viewsets.ModelViewSet):
     queryset = Coupon.objects.all().order_by('-created_at')
     serializer_class = CouponSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [ReadOnlyOrSuperAdmin]
 
 
 class AdvertisementViewSet(viewsets.ModelViewSet):
     queryset = Advertisement.objects.all().order_by('-created_at')
     serializer_class = AdvertisementSerializer
     parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [ReadOnlyOrSuperAdmin]
 
     def perform_create(self, serializer):
         image_file = self.request.FILES.get('image')
@@ -316,7 +339,7 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
 class StaffViewSet(viewsets.ModelViewSet):
     queryset = User.objects.filter(is_staff=True, is_superuser=False).order_by('-date_joined')
     serializer_class = StaffSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsSuperAdmin]
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
@@ -356,7 +379,7 @@ class StaffViewSet(viewsets.ModelViewSet):
 
 
 class CreateRazorpayOrderView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         amount = request.data.get("amount")
@@ -370,6 +393,10 @@ class CreateRazorpayOrderView(APIView):
             parsed_amount = float(amount)
             if parsed_amount <= 0:
                 return Response({"error": "Amount must be greater than zero"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Unlock plans: the price must match the admin's pricing (minus at most the best active coupon)
+            if pricing_key_for_plan(plan_name) and parsed_amount + 1 < minimum_plan_price(plan_name):
+                return Response({"error": "Amount does not match the plan price"}, status=status.HTTP_400_BAD_REQUEST)
 
             client = get_razorpay_client()
             user_id_str = str(request.user.id) if (request.user and request.user.is_authenticated) else ""
@@ -486,15 +513,8 @@ class VerifyLocalPaymentView(APIView):
             paid_amount = float(request.data.get('amount') or 0)
 
         # Unlock plans: make sure the price paid matches the plan (allowing the best active coupon)
-        pricing_key = pricing_key_for_plan(plan_name)
-        if pricing_key:
-            cfg = PricingConfig.objects.filter(key='global_pricing').first()
-            prices = (cfg.pricing_data if cfg and cfg.pricing_data else DEFAULT_PRICING).get('unlocks', {})
-            full_price = float(prices.get(pricing_key) or DEFAULT_PRICING['unlocks'][pricing_key])
-            best_coupon = Coupon.objects.filter(is_active=True).order_by('-discount_percentage').first()
-            discount = (best_coupon.discount_percentage if best_coupon else 0) / 100
-            if paid_amount + 1 < full_price * (1 - discount):
-                return Response({'error': 'Amount paid does not match the plan price'}, status=status.HTTP_400_BAD_REQUEST)
+        if pricing_key_for_plan(plan_name) and paid_amount + 1 < minimum_plan_price(plan_name):
+            return Response({'error': 'Amount paid does not match the plan price'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Property listing fee: send the property for admin approval
         if property_id:
@@ -536,7 +556,7 @@ class MyPurchasesView(generics.ListAPIView):
 
 class AllPurchasesAdminView(generics.ListAPIView):
     serializer_class = PurchaseSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsSuperAdmin]
     queryset = Purchase.objects.all().order_by('-created_at')
 
 
@@ -587,7 +607,10 @@ DEFAULT_PRICING = {
 }
 
 class PricingConfigView(APIView):
-    permission_classes = [permissions.AllowAny]
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsSuperAdmin()]
+        return [permissions.AllowAny()]
 
     def get(self, request):
         cfg = PricingConfig.objects.filter(key='global_pricing').first()
@@ -641,3 +664,21 @@ class VerifyStaffView(APIView):
             "email": user.email,
             "is_staff": user.is_staff,
         }, status=status.HTTP_200_OK)
+
+class ChangePasswordView(APIView):
+    """Lets a logged-in admin/staff change their own password (used by Admin > Security Settings)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        old_password = request.data.get('old_password') or ''
+        new_password = request.data.get('new_password') or ''
+        user = request.user
+        if not user.check_password(old_password):
+            return Response({'error': 'Current password is not correct.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(new_password) < 8:
+            return Response({'error': 'New password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+        if new_password == old_password:
+            return Response({'error': 'New password must be different.'}, status=status.HTTP_400_BAD_REQUEST)
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        return Response({'status': 'success'}, status=status.HTTP_200_OK)

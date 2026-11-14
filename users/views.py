@@ -65,18 +65,22 @@ class GoogleLoginView(APIView):
 from rest_framework import permissions
 
 class CompleteProfileView(APIView):
-    permission_classes = [permissions.AllowAny]
+    # Only the logged-in user can edit their own profile (no more editing by email)
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        u = request.user
+        profile = getattr(u, 'profile', None)
+        return Response({
+            "is_profile_complete": bool(profile and profile.is_profile_complete),
+            "first_name": u.first_name,
+            "email": u.email,
+            "phone_number": profile.phone_number if profile else '',
+            "address": profile.address if profile else '',
+        }, status=status.HTTP_200_OK)
 
     def put(self, request):
-        target_user = request.user if (request.user and request.user.is_authenticated) else None
-        
-        if not target_user:
-            email = request.data.get('email')
-            if email:
-                target_user = User.objects.filter(email=email).first() or User.objects.filter(username=email).first()
-        
-        if not target_user:
-            return Response({'error': 'Authentication or valid email required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        target_user = request.user
 
         serializer = UserProfileSerializer(target_user, data=request.data, partial=True)
         if serializer.is_valid():
@@ -94,7 +98,9 @@ class CompleteProfileView(APIView):
 
 
 class ListUsersView(APIView):
-    permission_classes = [permissions.AllowAny]
+    def get_permissions(self):
+        from listings.permissions import IsStaffOrAdmin
+        return [IsStaffOrAdmin()]
 
     def get(self, request):
         users = (

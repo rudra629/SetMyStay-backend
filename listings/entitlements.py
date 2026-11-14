@@ -52,7 +52,8 @@ def get_entitlement(user):
         if kind == 'credits':
             credits_bought += n
         elif kind == 'unlimited':
-            windows.append((p.created_at, p.created_at + timedelta(days=UNLIMITED_DAYS)))
+            # small grace window: the unlock call can land a moment before the payment is saved
+            windows.append((p.created_at - timedelta(minutes=10), p.created_at + timedelta(days=UNLIMITED_DAYS)))
 
     # Unlocks made while an Ultimate subscription was active are free.
     def during_unlimited(ts):
