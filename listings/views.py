@@ -1,5 +1,7 @@
 from datetime import timedelta
 import razorpay
+import cloudinary
+import cloudinary.uploader
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
@@ -19,6 +21,7 @@ from .models import (
     Coupon,
     Advertisement,
     Purchase,
+    PricingConfig,
 )
 from .serializers import (
     PropertySerializer,
@@ -66,33 +69,81 @@ class PropertyViewSet(viewsets.ModelViewSet):
         owner = self.request.user if (self.request.user and self.request.user.is_authenticated) else User.objects.first()
         property_instance = serializer.save(owner=owner, status='PENDING')
 
-        # 2. Safely save Images to Cloud/Local
-        try:
-            images = self.request.FILES.getlist('uploaded_images')
-            for image in images:
-                file_path = default_storage.save(f'property_images/{image.name}', ContentFile(image.read()))
-                full_image_url = default_storage.url(file_path)
+        # 2. Upload images to Cloudinary (with fallback to default storage)
+        images = self.request.FILES.getlist('uploaded_images')
+        for image in images:
+            full_image_url = None
+            try:
+                if getattr(settings, 'CLOUDINARY_CLOUD_NAME', None) and getattr(settings, 'CLOUDINARY_API_KEY', None):
+                    upload_res = cloudinary.uploader.upload(
+                        image,
+                        folder="setmystay/property_images",
+                        resource_type="auto"
+                    )
+                    full_image_url = upload_res.get('secure_url') or upload_res.get('url')
+            except Exception as ce:
+                print("Cloudinary image upload note, falling back:", ce)
+
+            if not full_image_url:
+                try:
+                    file_path = default_storage.save(f'property_images/{image.name}', ContentFile(image.read()))
+                    full_image_url = default_storage.url(file_path)
+                except Exception as fe:
+                    print("Default storage image fallback note:", fe)
+
+            if full_image_url:
                 ListingImage.objects.create(property=property_instance, image_url=full_image_url, is_video=False)
-        except Exception as e:
-            print("Image upload fallback:", e)
-            if not property_instance.images.exists():
-                ListingImage.objects.create(
-                    property=property_instance,
-                    image_url='https://placehold.co/600x400?text=Property+Image',
-                    is_video=False
-                )
 
-        # 3. Safely save Video if provided
-        try:
-            video_file = self.request.FILES.get('uploaded_video')
-            if video_file:
-                video_path = default_storage.save(f'property_videos/{video_file.name}', ContentFile(video_file.read()))
-                full_video_url = default_storage.url(video_path)
+        if not property_instance.images.exists():
+            ListingImage.objects.create(
+                property=property_instance,
+                image_url='https://placehold.co/600x400?text=Property+Image',
+                is_video=False
+            )
+
+        # 3. Upload video to Cloudinary if provided
+        video_file = self.request.FILES.get('uploaded_video')
+        if video_file:
+            full_video_url = None
+            try:
+                if getattr(settings, 'CLOUDINARY_CLOUD_NAME', None) and getattr(settings, 'CLOUDINARY_API_KEY', None):
+                    upload_res = cloudinary.uploader.upload_large(
+                        video_file,
+                        folder="setmystay/property_videos",
+                        resource_type="video"
+                    )
+                    full_video_url = upload_res.get('secure_url') or upload_res.get('url')
+            except Exception as ve:
+                print("Cloudinary video upload note, falling back:", ve)
+
+            if not full_video_url:
+                try:
+                    video_path = default_storage.save(f'property_videos/{video_file.name}', ContentFile(video_file.read()))
+                    full_video_url = default_storage.url(video_path)
+                except Exception as fe:
+                    print("Default storage video fallback note:", fe)
+
+            if full_video_url:
                 ListingImage.objects.create(property=property_instance, image_url=full_video_url, is_video=True)
-        except Exception as e:
-            print("Video upload fallback:", e)
 
-        # 4. Save Amenities
+        # 4. Upload verification documents (Aadhaar, Electricity Bill, NOC) to Cloudinary
+        for doc_field in ['document_aadhaar', 'document_electricity', 'document_noc']:
+            doc_file = self.request.FILES.get(doc_field)
+            if doc_file and getattr(settings, 'CLOUDINARY_CLOUD_NAME', None) and getattr(settings, 'CLOUDINARY_API_KEY', None):
+                try:
+                    upload_res = cloudinary.uploader.upload(
+                        doc_file,
+                        folder="setmystay/verification_docs",
+                        resource_type="auto"
+                    )
+                    doc_url = upload_res.get('secure_url') or upload_res.get('url')
+                    if doc_url:
+                        setattr(property_instance, doc_field, doc_url)
+                        property_instance.save(update_fields=[doc_field])
+                except Exception as doc_err:
+                    print(f"Cloudinary {doc_field} upload note:", doc_err)
+
+        # 5. Save Amenities
         try:
             amenities_str = self.request.data.get('amenities_list', '')
             if amenities_str:
@@ -276,10 +327,14 @@ class CreateRazorpayOrderView(APIView):
             return Response({"error": "Amount is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            parsed_amount = float(amount)
+            if parsed_amount <= 0:
+                return Response({"error": "Amount must be greater than zero"}, status=status.HTTP_400_BAD_REQUEST)
+
             client = get_razorpay_client()
             user_id_str = str(request.user.id) if (request.user and request.user.is_authenticated) else ""
             order_data = {
-                "amount": int(float(amount) * 100),
+                "amount": int(parsed_amount * 100),
                 "currency": "INR",
                 "payment_capture": "1",
                 "notes": {
@@ -294,7 +349,9 @@ class CreateRazorpayOrderView(APIView):
                 "order_id": razorpay_order['id'],
                 "amount": razorpay_order['amount'],
                 "currency": razorpay_order['currency'],
-                "razorpay_key": settings.RAZORPAY_KEY_ID
+                "razorpay_key": settings.RAZORPAY_KEY_ID,
+                "key": settings.RAZORPAY_KEY_ID,
+                "key_id": settings.RAZORPAY_KEY_ID
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
@@ -383,7 +440,14 @@ class VerifyLocalPaymentView(APIView):
 
         # 2. Save the Purchase record so it shows up in User & Admin Purchase History
         try:
-            user = request.user if (request.user and request.user.is_authenticated) else User.objects.first()
+            user = request.user if (request.user and request.user.is_authenticated) else None
+            if not user:
+                email = request.data.get('email') or request.data.get('user_email')
+                if email:
+                    user = User.objects.filter(email=email).first() or User.objects.filter(username=email).first()
+            if not user:
+                user = User.objects.first()
+
             if user:
                 Purchase.objects.get_or_create(
                     razorpay_payment_id=payment_id,
@@ -410,10 +474,40 @@ class MyPurchasesView(generics.ListAPIView):
     def get_queryset(self):
         if self.request.user and self.request.user.is_authenticated:
             return Purchase.objects.filter(user=self.request.user).order_by('-created_at')
-        return Purchase.objects.all().order_by('-created_at')[:10]
+        email = self.request.query_params.get('email')
+        if email:
+            user = User.objects.filter(email=email).first() or User.objects.filter(username=email).first()
+            if user:
+                return Purchase.objects.filter(user=user).order_by('-created_at')
+        return Purchase.objects.all().order_by('-created_at')[:25]
 
 
 class AllPurchasesAdminView(generics.ListAPIView):
     serializer_class = PurchaseSerializer
     permission_classes = [permissions.AllowAny]
     queryset = Purchase.objects.all().order_by('-created_at')
+
+
+DEFAULT_PRICING = {
+    "unlocks": {"1": 49, "5": 199, "10": 399, "unlimited": 999},
+    "listings": {"roommate": 149, "pg": 349, "rental": 999}
+}
+
+class PricingConfigView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        cfg = PricingConfig.objects.filter(key='global_pricing').first()
+        if cfg and cfg.pricing_data:
+            return Response(cfg.pricing_data, status=status.HTTP_200_OK)
+        return Response(DEFAULT_PRICING, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        data = request.data
+        if not isinstance(data, dict):
+            return Response({"error": "Invalid pricing payload"}, status=status.HTTP_400_BAD_REQUEST)
+        cfg, _ = PricingConfig.objects.update_or_create(
+            key='global_pricing',
+            defaults={'pricing_data': data}
+        )
+        return Response(cfg.pricing_data, status=status.HTTP_200_OK)

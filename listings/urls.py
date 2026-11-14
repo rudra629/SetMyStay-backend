@@ -9,6 +9,7 @@ from .views import (
     MyPropertiesView,
     MyPurchasesView,
     AllPurchasesAdminView,
+    PricingConfigView,
 )
 
 router = DefaultRouter()
@@ -29,4 +30,5 @@ urlpatterns = [
     path('payments/my-history/', MyPurchasesView.as_view(), name='my-purchases'),
     path('payments/all-history/', AllPurchasesAdminView.as_view(), name='all-purchases'),
     path('payments/verify-local/', VerifyLocalPaymentView.as_view(), name='verify-local'),
+    path('pricing/', PricingConfigView.as_view(), name='pricing-config'),
 ]

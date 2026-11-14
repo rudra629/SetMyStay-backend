@@ -44,8 +44,11 @@ class GoogleLoginView(APIView):
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
                 'is_profile_complete': user.profile.is_profile_complete,
-                'picture': picture, # 👈 ADD THIS: Send it to React
-                'first_name': first_name, # 👈 ADD THIS: Send the name
+                'picture': picture,
+                'first_name': user.first_name or first_name,
+                'email': user.email or email,
+                'phone_number': user.profile.phone_number or '',
+                'address': user.profile.address or '',
                 'message': 'Login Successful'
             })
 
@@ -59,16 +62,56 @@ class GoogleLoginView(APIView):
             return Response({'error': f'Invalid Google token: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
 
+from rest_framework import permissions
+
 class CompleteProfileView(APIView):
-    permission_classes = [IsAuthenticated] # User must send their access token to use this
+    permission_classes = [permissions.AllowAny]
 
     def put(self, request):
-        serializer = UserProfileSerializer(request.user, data=request.data, partial=True)
+        target_user = request.user if (request.user and request.user.is_authenticated) else None
+        
+        if not target_user:
+            email = request.data.get('email')
+            if email:
+                target_user = User.objects.filter(email=email).first() or User.objects.filter(username=email).first()
+        
+        if not target_user:
+            return Response({'error': 'Authentication or valid email required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        serializer = UserProfileSerializer(target_user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response({
                 "message": "Profile updated successfully!", 
-                "is_profile_complete": request.user.profile.is_profile_complete
+                "is_profile_complete": target_user.profile.is_profile_complete,
+                "first_name": target_user.first_name,
+                "email": target_user.email,
+                "phone_number": target_user.profile.phone_number,
+                "address": target_user.profile.address,
             }, status=status.HTTP_200_OK)
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ListUsersView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        users = User.objects.all().select_related('profile').order_by('-date_joined')
+        data = []
+        for u in users:
+            profile = getattr(u, 'profile', None)
+            data.append({
+                'id': u.id,
+                'username': u.username,
+                'first_name': u.first_name,
+                'last_name': u.last_name,
+                'name': f"{u.first_name} {u.last_name}".strip() or u.username,
+                'email': u.email or u.username,
+                'phone_number': profile.phone_number if profile else '',
+                'address': profile.address if profile else '',
+                'role': profile.role if profile else 'SEEKER',
+                'is_profile_complete': profile.is_profile_complete if profile else False,
+                'date_joined': u.date_joined,
+            })
+        return Response(data, status=status.HTTP_200_OK)

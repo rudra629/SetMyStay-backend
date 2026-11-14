@@ -46,6 +46,10 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.vercel.app',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
 ]
 
 # --- APPLICATION DEFINITION ---
@@ -64,6 +68,8 @@ INSTALLED_APPS = [
     'management',
     'interactions',
     'storages',
+    'cloudinary_storage',
+    'cloudinary',
 ]
 
 # --- REST FRAMEWORK CONFIGURATION ---
@@ -142,31 +148,36 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
-# --- GOOGLE CLOUD STORAGE & STORAGES (Django 5.2+) ---
-# --- GOOGLE CLOUD STORAGE & STORAGES (SAFE FALLBACK) ---
-GS_BUCKET_NAME = 'setmystay-media-bucket-2026'
-GS_DEFAULT_ACL = None
+# --- CLOUDINARY MEDIA & STORAGE CONFIGURATION ---
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 
-LOCAL_GCS_PATH = os.path.join(BASE_DIR, 'gcs-keys.json')
-RENDER_GCS_PATH = '/etc/secrets/gcs-keys.json'
+CLOUDINARY_CLOUD_NAME = os.environ.get('CLOUDINARY_CLOUD_NAME')
+CLOUDINARY_API_KEY = os.environ.get('CLOUDINARY_API_KEY')
+CLOUDINARY_API_SECRET = os.environ.get('CLOUDINARY_API_SECRET')
 
-if os.path.exists(LOCAL_GCS_PATH):
-    GS_CREDENTIALS = service_account.Credentials.from_service_account_file(LOCAL_GCS_PATH)
-elif os.path.exists(RENDER_GCS_PATH):
-    GS_CREDENTIALS = service_account.Credentials.from_service_account_file(RENDER_GCS_PATH)
-else:
-    GS_CREDENTIALS = None
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': CLOUDINARY_CLOUD_NAME,
+    'API_KEY': CLOUDINARY_API_KEY,
+    'API_SECRET': CLOUDINARY_API_SECRET,
+}
 
-if GS_CREDENTIALS:
+if CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET:
+    cloudinary.config(
+        cloud_name=CLOUDINARY_CLOUD_NAME,
+        api_key=CLOUDINARY_API_KEY,
+        api_secret=CLOUDINARY_API_SECRET,
+        secure=True
+    )
     STORAGES = {
         "default": {
-            "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
+            "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
         },
         "staticfiles": {
             "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
         },
     }
-    MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
 else:
     STORAGES = {
         "default": {
@@ -178,3 +189,4 @@ else:
     }
     MEDIA_URL = '/media/'
     MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+

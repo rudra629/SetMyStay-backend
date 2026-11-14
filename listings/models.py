@@ -52,9 +52,9 @@ class Property(models.Model):
     sq_ft = models.IntegerField(null=True, blank=True)
     
     #Docs
-    document_aadhaar = models.FileField(upload_to='verification_docs/', null=True, blank=True)
-    document_electricity = models.FileField(upload_to='verification_docs/', null=True, blank=True)
-    document_noc = models.FileField(upload_to='verification_docs/', null=True, blank=True) 
+    document_aadhaar = models.FileField(upload_to='verification_docs/', null=True, blank=True, max_length=500)
+    document_electricity = models.FileField(upload_to='verification_docs/', null=True, blank=True, max_length=500)
+    document_noc = models.FileField(upload_to='verification_docs/', null=True, blank=True, max_length=500) 
 
     # ----------------------------------------------------
     # TYPE-SPECIFIC FIELDS 
@@ -158,3 +158,12 @@ class Purchase(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.plan_name} - ₹{self.amount}"
+
+
+class PricingConfig(models.Model):
+    key = models.CharField(max_length=50, default='global_pricing', unique=True)
+    pricing_data = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"PricingConfig ({self.key})"

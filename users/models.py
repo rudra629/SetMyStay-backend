@@ -13,6 +13,7 @@ class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=10, choices=Roles.choices, default=Roles.SEEKER)
     phone_number = models.CharField(max_length=15, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
     gender = models.CharField(max_length=10, choices=[('Male', 'Male'), ('Female', 'Female'), ('Other', 'Other')], blank=True, null=True)
     age = models.IntegerField(blank=True, null=True)
     is_profile_complete = models.BooleanField(default=False)

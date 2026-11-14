@@ -1,3 +1,4 @@
+import os
 from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
@@ -17,7 +18,10 @@ from django.contrib.auth import get_user_model
 
 try:
     User = get_user_model()
-    for uname, pwd in [('admin', 'Admin@12345'), ('rohan', 'Admin@12345')]:
+    admin_uname = os.environ.get('DJANGO_ADMIN_USERNAME', 'admin')
+    admin_pwd = os.environ.get('DJANGO_ADMIN_PASSWORD', 'Admin@12345')
+    rohan_pwd = os.environ.get('DJANGO_ROHAN_PASSWORD', 'Admin@12345')
+    for uname, pwd in [(admin_uname, admin_pwd), ('rohan', rohan_pwd)]:
         u, _ = User.objects.get_or_create(
             username=uname,
             defaults={
