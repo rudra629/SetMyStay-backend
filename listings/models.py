@@ -182,3 +182,13 @@ class UserUnlock(models.Model):
 
     def __str__(self):
         return f"{self.user.username} unlocked {self.property_id}"
+
+
+class SwipeUsage(models.Model):
+    """How many roommate swipes a user has used in the current window (resets every N hours)."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='swipe_usage')
+    count = models.IntegerField(default=0)
+    window_start = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username}: {self.count} swipes"

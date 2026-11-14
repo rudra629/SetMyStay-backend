@@ -6,6 +6,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.db import transaction
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, filters, permissions, parsers, generics, status
@@ -23,6 +24,7 @@ from .models import (
     Purchase,
     PricingConfig,
     UserUnlock,
+    SwipeUsage,
 )
 from .permissions import (
     IsStaffOrAdmin, IsSuperAdmin, ReadOnlyOrSuperAdmin, ReadOnlyOrStaff, IsOwnerOrStaff, is_staff_user,
@@ -606,6 +608,53 @@ DEFAULT_PRICING = {
     "listings": {"roommate": 149, "pg": 349, "rental": 999}
 }
 
+DEFAULT_APP_SETTINGS = {'swipe_limit': 25, 'swipe_reset_hours': 24, 'slot_cooldown_hours': 24}
+
+
+def get_app_settings():
+    cfg = PricingConfig.objects.filter(key='global_pricing').first()
+    stored = ((cfg.pricing_data or {}).get('settings') if cfg else None) or {}
+    return {**DEFAULT_APP_SETTINGS, **stored}
+
+
+class SwipesView(APIView):
+    """Roommate swipes per account, stored on the server and reset every `swipe_reset_hours`."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _state(self, usage, cfg):
+        resets_at = usage.window_start + timedelta(hours=cfg['swipe_reset_hours'])
+        return {
+            'limit': cfg['swipe_limit'],
+            'used': usage.count,
+            'left': max(0, cfg['swipe_limit'] - usage.count),
+            'resets_at': resets_at.isoformat(),
+            'reset_hours': cfg['swipe_reset_hours'],
+        }
+
+    def _usage(self, user, cfg, lock=False):
+        qs = SwipeUsage.objects.select_for_update() if lock else SwipeUsage.objects
+        usage, _ = qs.get_or_create(user=user)
+        if timezone.now() >= usage.window_start + timedelta(hours=cfg['swipe_reset_hours']):
+            usage.count = 0
+            usage.window_start = timezone.now()
+            usage.save(update_fields=['count', 'window_start'])
+        return usage
+
+    def get(self, request):
+        cfg = get_app_settings()
+        return Response(self._state(self._usage(request.user, cfg), cfg))
+
+    def post(self, request):
+        cfg = get_app_settings()
+        with transaction.atomic():
+            usage = self._usage(request.user, cfg, lock=True)
+            if usage.count >= cfg['swipe_limit']:
+                return Response({**self._state(usage, cfg), 'error': 'No swipes left'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            usage.count += 1
+            usage.save(update_fields=['count'])
+        return Response(self._state(usage, cfg))
+
+
 class PricingConfigView(APIView):
     def get_permissions(self):
         if self.request.method == 'POST':
@@ -614,14 +663,41 @@ class PricingConfigView(APIView):
 
     def get(self, request):
         cfg = PricingConfig.objects.filter(key='global_pricing').first()
-        if cfg and cfg.pricing_data:
-            return Response(cfg.pricing_data, status=status.HTTP_200_OK)
-        return Response(DEFAULT_PRICING, status=status.HTTP_200_OK)
+        data = dict(cfg.pricing_data) if cfg and cfg.pricing_data else dict(DEFAULT_PRICING)
+        data['settings'] = get_app_settings()
+        return Response(data, status=status.HTTP_200_OK)
 
     def post(self, request):
         data = request.data
         if not isinstance(data, dict):
             return Response({"error": "Invalid pricing payload"}, status=status.HTTP_400_BAD_REQUEST)
+        data = dict(data)
+        # Swipe / slot-machine settings set by the admin are stored with the pricing
+        cfg_old = PricingConfig.objects.filter(key='global_pricing').first()
+        old_settings = ((cfg_old.pricing_data or {}).get('settings') if cfg_old else None) or {}
+        incoming = data.get('settings') or {}
+        merged = {**DEFAULT_APP_SETTINGS, **old_settings}
+        for k in DEFAULT_APP_SETTINGS:
+            if k in incoming:
+                try:
+                    v = int(incoming[k])
+                except (TypeError, ValueError):
+                    return Response({"error": f"Invalid value for {k}"}, status=status.HTTP_400_BAD_REQUEST)
+                if v < 1 or v > 10000:
+                    return Response({"error": f"{k} must be between 1 and 10000"}, status=status.HTTP_400_BAD_REQUEST)
+                merged[k] = v
+        data['settings'] = merged
+        for section in ('unlocks', 'listings'):
+            prices = data.get(section)
+            if not isinstance(prices, dict) or not prices:
+                return Response({"error": f"Missing {section} prices"}, status=status.HTTP_400_BAD_REQUEST)
+            for plan, price in prices.items():
+                try:
+                    ok = float(price) > 0
+                except (TypeError, ValueError):
+                    ok = False
+                if not ok:
+                    return Response({"error": f"Price for {section} '{plan}' must be a number above 0"}, status=status.HTTP_400_BAD_REQUEST)
         cfg, _ = PricingConfig.objects.update_or_create(
             key='global_pricing',
             defaults={'pricing_data': data}
