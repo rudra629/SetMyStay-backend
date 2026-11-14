@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, time as dt_time, timedelta
+from zoneinfo import ZoneInfo
 import razorpay
 import cloudinary
 import cloudinary.uploader
@@ -622,24 +623,33 @@ def get_app_settings():
     return {**DEFAULT_APP_SETTINGS, **stored}
 
 
+IST = ZoneInfo('Asia/Kolkata')
+
+
+def next_ist_midnight(now=None):
+    now_ist = (now or timezone.now()).astimezone(IST)
+    tomorrow = (now_ist + timedelta(days=1)).date()
+    return datetime.combine(tomorrow, dt_time.min, tzinfo=IST)
+
+
 class SwipesView(APIView):
-    """Roommate swipes per account, stored on the server and reset every `swipe_reset_hours`."""
+    """Roommate swipes per account, stored on the server. Every day at 12:00 AM IST the
+    count goes back to 0, so the user gets the admin's 'swipes per account' again."""
     permission_classes = [permissions.IsAuthenticated]
 
     def _state(self, usage, cfg):
-        resets_at = usage.window_start + timedelta(hours=cfg['swipe_reset_hours'])
         return {
             'limit': cfg['swipe_limit'],
             'used': usage.count,
             'left': max(0, cfg['swipe_limit'] - usage.count),
-            'resets_at': resets_at.isoformat(),
-            'reset_hours': cfg['swipe_reset_hours'],
+            'resets_at': next_ist_midnight().isoformat(),
         }
 
-    def _usage(self, user, cfg, lock=False):
+    def _usage(self, user, lock=False):
         qs = SwipeUsage.objects.select_for_update() if lock else SwipeUsage.objects
         usage, _ = qs.get_or_create(user=user)
-        if timezone.now() >= usage.window_start + timedelta(hours=cfg['swipe_reset_hours']):
+        today_ist = timezone.now().astimezone(IST).date()
+        if usage.window_start.astimezone(IST).date() != today_ist:
             usage.count = 0
             usage.window_start = timezone.now()
             usage.save(update_fields=['count', 'window_start'])
@@ -647,12 +657,12 @@ class SwipesView(APIView):
 
     def get(self, request):
         cfg = get_app_settings()
-        return Response(self._state(self._usage(request.user, cfg), cfg))
+        return Response(self._state(self._usage(request.user), cfg))
 
     def post(self, request):
         cfg = get_app_settings()
         with transaction.atomic():
-            usage = self._usage(request.user, cfg, lock=True)
+            usage = self._usage(request.user, lock=True)
             if usage.count >= cfg['swipe_limit']:
                 return Response({**self._state(usage, cfg), 'error': 'No swipes left'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
             usage.count += 1
