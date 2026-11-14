@@ -757,4 +757,7 @@ class ChangePasswordView(APIView):
             return Response({'error': 'New password must be different.'}, status=status.HTTP_400_BAD_REQUEST)
         user.set_password(new_password)
         user.save(update_fields=['password'])
+        # A new password signs out every remembered admin device (they need the email code again)
+        from .models import TrustedAdminDevice
+        TrustedAdminDevice.objects.filter(user=user).delete()
         return Response({'status': 'success'}, status=status.HTTP_200_OK)

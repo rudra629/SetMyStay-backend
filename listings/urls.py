@@ -2,6 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from . import views
+from .admin_auth import NoAdminTokenObtainPairView, AdminLoginView, AdminVerifyOTPView, AdminForgetDevicesView
 from .views import (
     CreateRazorpayOrderView,
     RazorpayWebhookView,
@@ -30,7 +31,11 @@ router.register(r'advertisements', views.AdvertisementViewSet, basename='adverti
 urlpatterns = [
     path('', include(router.urls)),
     path('my-properties/', MyPropertiesView.as_view(), name='my-properties'),
-    path('auth/login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    # Normal/staff login (refuses the main admin, who must use the 2-step admin login below)
+    path('auth/login/', NoAdminTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('auth/admin/login/', AdminLoginView.as_view(), name='admin-login'),
+    path('auth/admin/verify-otp/', AdminVerifyOTPView.as_view(), name='admin-verify-otp'),
+    path('auth/admin/forget-devices/', AdminForgetDevicesView.as_view(), name='admin-forget-devices'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('payments/create-order/', CreateRazorpayOrderView.as_view(), name='create-order'),
     path('payments/webhook/', RazorpayWebhookView.as_view(), name='razorpay-webhook'),

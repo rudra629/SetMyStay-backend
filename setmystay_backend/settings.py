@@ -26,6 +26,10 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
+# Login tokens are signed with JWT_SIGNING_KEY (set on Render). The fallback SECRET_KEY
+# below is visible in the public repo, so it must never be used to sign real logins.
+if os.environ.get('JWT_SIGNING_KEY'):
+    SIMPLE_JWT['SIGNING_KEY'] = os.environ['JWT_SIGNING_KEY']
 
 # --- SECURITY & HOSTS ---
 SECRET_KEY = os.environ.get(
@@ -84,6 +88,11 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    # Limits for the admin sign-in endpoints (per IP)
+    'DEFAULT_THROTTLE_RATES': {
+        'admin_login': '20/hour',
+        'admin_otp': '30/hour',
+    },
 }
 
 # --- MIDDLEWARE ---

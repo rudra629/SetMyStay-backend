@@ -5,41 +5,37 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
     path('api/', include('listings.urls')),
     path('api/users/', include('users.urls')),
 ]
 
+# The Django admin site (/admin/) only asks for a password, so it would skip the
+# email code. It is off unless DJANGO_ADMIN_SITE_ENABLED=True is set on Render.
+if os.environ.get('DJANGO_ADMIN_SITE_ENABLED') == 'True':
+    urlpatterns.insert(0, path('admin/', admin.site.urls))
+
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-# --- AUTO-SEED ADMIN USER & COUPONS ON RENDER STARTUP ---
+# --- FIRST-RUN SEED ---
+# Creates the admin account ONLY if it does not exist yet, and never resets an
+# existing password (before, every restart reset it to a default value).
 from django.contrib.auth import get_user_model
 
 try:
     User = get_user_model()
     admin_uname = os.environ.get('DJANGO_ADMIN_USERNAME', 'admin')
-    admin_pwd = os.environ.get('DJANGO_ADMIN_PASSWORD', 'Admin@12345')
-    rohan_pwd = os.environ.get('DJANGO_ROHAN_PASSWORD', 'Admin@12345')
-    for uname, pwd in [(admin_uname, admin_pwd), ('rohan', rohan_pwd)]:
-        u, _ = User.objects.get_or_create(
-            username=uname,
-            defaults={
-                'email': f'{uname}@setmystay.com',
-                'first_name': uname.capitalize(),
-                'is_staff': True,
-                'is_superuser': True,
-                'is_active': True,
-            }
+    admin_pwd = os.environ.get('DJANGO_ADMIN_PASSWORD')
+    if admin_pwd and not User.objects.filter(username=admin_uname).exists():
+        User.objects.create_superuser(
+            username=admin_uname,
+            email=os.environ.get('DJANGO_ADMIN_EMAIL', ''),
+            password=admin_pwd,
         )
-        u.is_staff = True
-        u.is_superuser = True
-        u.is_active = True
-        u.set_password(pwd)
-        u.save()
 
     from listings.models import Coupon
-    Coupon.objects.get_or_create(code='WELCOME10', defaults={'discount_percentage': 10, 'is_active': True})
-    Coupon.objects.get_or_create(code='STAY20', defaults={'discount_percentage': 20, 'is_active': True})
+    if not Coupon.objects.exists():
+        Coupon.objects.get_or_create(code='WELCOME10', defaults={'discount_percentage': 10, 'is_active': True})
+        Coupon.objects.get_or_create(code='STAY20', defaults={'discount_percentage': 20, 'is_active': True})
 except Exception as e:
     print("Startup seed note:", e)

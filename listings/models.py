@@ -192,3 +192,30 @@ class SwipeUsage(models.Model):
 
     def __str__(self):
         return f"{self.user.username}: {self.count} swipes"
+
+
+class AdminLoginOTP(models.Model):
+    """One-time email code for admin sign-in (2-step verification)."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='admin_otps')
+    challenge_id = models.CharField(max_length=64, unique=True)
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.IntegerField(default=0)
+    used = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"OTP for {self.user.username} ({'used' if self.used else 'open'})"
+
+
+class TrustedAdminDevice(models.Model):
+    """A browser where the admin ticked 'Remember this device' (skips the email code until it expires)."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='trusted_devices')
+    token_hash = models.CharField(max_length=128, unique=True)
+    label = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.user.username} device ({self.label[:40]})"
