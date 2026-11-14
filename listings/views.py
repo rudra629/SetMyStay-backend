@@ -761,3 +761,38 @@ class ChangePasswordView(APIView):
         from .models import TrustedAdminDevice
         TrustedAdminDevice.objects.filter(user=user).delete()
         return Response({'status': 'success'}, status=status.HTTP_200_OK)
+
+
+DEFAULT_SITE_CONTACT = {
+    'email': 'setmystay02@gmail.com',
+    'phone': '+91 79771 69550',
+    'address': 'Office no. 01, Neelsidhi Splendour, Sector 15, CBD Belapur, Navi Mumbai, Maharashtra 400614',
+}
+
+
+class SiteContactView(APIView):
+    """Footer contact details. Everyone can read; only the main admin can change them."""
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsSuperAdmin()]
+        return [permissions.AllowAny()]
+
+    def get(self, request):
+        cfg = PricingConfig.objects.filter(key='site_contact').first()
+        data = {**DEFAULT_SITE_CONTACT, **((cfg.pricing_data if cfg else None) or {})}
+        return Response(data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        email = str(request.data.get('email') or '').strip()
+        phone = str(request.data.get('phone') or '').strip()
+        address = str(request.data.get('address') or '').strip()
+        if '@' not in email or len(email) > 200:
+            return Response({'error': 'Please enter a valid email.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(''.join(c for c in phone if c.isdigit())) < 10 or len(phone) > 30:
+            return Response({'error': 'Please enter a valid phone number.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(address) < 5 or len(address) > 500:
+            return Response({'error': 'Please enter the address.'}, status=status.HTTP_400_BAD_REQUEST)
+        data = {'email': email, 'phone': phone, 'address': address}
+        PricingConfig.objects.update_or_create(key='site_contact', defaults={'pricing_data': data})
+        return Response(data, status=status.HTTP_200_OK)
