@@ -9,14 +9,16 @@ from google.oauth2 import service_account
 from dotenv import load_dotenv
 import dj_database_url
 
-load_dotenv()
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from backend directory and working directory
+load_dotenv(BASE_DIR / '.env')
+load_dotenv()
+
 # --- RAZORPAY CONFIGURATION ---
-RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
-RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
+RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID', 'rzp_test_Tf3u02X48fg0SH')
+RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', 'UEdr025taGJSLoQFPU59cuUU')
 RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET')
 
 # --- JWT CONFIGURATION ---

@@ -31,10 +31,10 @@ class PropertySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'property_type', 'status',
             'rent', 'deposit', 'is_negotiable',
-            'city', 'area', 'address',
+            'city', 'area', 'address', 'state', 'vendor_number',
             'bhk', 'furnishing', 'sq_ft',
             'occupancy_type', 'gender_preference',
-            'sharing_status', 'is_broker', 
+            'sharing_status', 'is_broker', 'age', 
             
             # 👇 ADDED: The new contact fields from your model
             'owner_name', 'phone_primary', 'phone_secondary',

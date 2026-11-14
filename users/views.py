@@ -97,7 +97,12 @@ class ListUsersView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        users = User.objects.all().select_related('profile').order_by('-date_joined')
+        users = (
+            User.objects.filter(is_staff=False, is_superuser=False)
+            .exclude(profile__role__in=['STAFF', 'ADMIN'])
+            .select_related('profile')
+            .order_by('-date_joined')
+        )
         data = []
         for u in users:
             profile = getattr(u, 'profile', None)
@@ -111,6 +116,7 @@ class ListUsersView(APIView):
                 'phone_number': profile.phone_number if profile else '',
                 'address': profile.address if profile else '',
                 'role': profile.role if profile else 'SEEKER',
+                'is_staff': u.is_staff,
                 'is_profile_complete': profile.is_profile_complete if profile else False,
                 'date_joined': u.date_joined,
             })

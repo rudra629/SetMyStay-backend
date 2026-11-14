@@ -42,9 +42,11 @@ class Property(models.Model):
     is_negotiable = models.BooleanField(default=False)
 
     # Location
+    state = models.CharField(max_length=100, blank=True, null=True, default='Maharashtra')
     city = models.CharField(max_length=100, blank=True, null=True)
     area = models.CharField(max_length=100, blank=True, null=True) 
     address = models.TextField(blank=True, null=True)
+    vendor_number = models.CharField(max_length=50, blank=True, null=True)
 
     # Property Specs
     bhk = models.CharField(max_length=20, blank=True) 
@@ -67,6 +69,7 @@ class Property(models.Model):
     gender_preference = models.CharField(max_length=20, blank=True) 
     
     # Roommate Specifics 
+    age = models.IntegerField(null=True, blank=True)
     sharing_status = models.CharField(
         max_length=50, 
         choices=[('Living in', 'Yes, living in property'), ('Moving soon', 'Going within a month')],
@@ -141,7 +144,7 @@ class Coupon(models.Model):
 class Advertisement(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField()
-    image = models.ImageField(upload_to='advertisements/')
+    image = models.ImageField(upload_to='advertisements/', max_length=500)
     is_active = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

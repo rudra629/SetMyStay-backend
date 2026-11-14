@@ -272,6 +272,44 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
     parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
     permission_classes = [permissions.AllowAny]
 
+    def perform_create(self, serializer):
+        image_file = self.request.FILES.get('image')
+        cloudinary_url = None
+        if image_file and getattr(settings, 'CLOUDINARY_CLOUD_NAME', None) and getattr(settings, 'CLOUDINARY_API_KEY', None):
+            try:
+                upload_res = cloudinary.uploader.upload(
+                    image_file,
+                    folder="setmystay/advertisements",
+                    resource_type="auto"
+                )
+                cloudinary_url = upload_res.get('secure_url') or upload_res.get('url')
+            except Exception as ce:
+                print("Cloudinary ad upload note, falling back:", ce)
+        
+        instance = serializer.save()
+        if cloudinary_url:
+            instance.image = cloudinary_url
+            instance.save(update_fields=['image'])
+
+    def perform_update(self, serializer):
+        image_file = self.request.FILES.get('image')
+        cloudinary_url = None
+        if image_file and getattr(settings, 'CLOUDINARY_CLOUD_NAME', None) and getattr(settings, 'CLOUDINARY_API_KEY', None):
+            try:
+                upload_res = cloudinary.uploader.upload(
+                    image_file,
+                    folder="setmystay/advertisements",
+                    resource_type="auto"
+                )
+                cloudinary_url = upload_res.get('secure_url') or upload_res.get('url')
+            except Exception as ce:
+                print("Cloudinary ad update note, falling back:", ce)
+        
+        instance = serializer.save()
+        if cloudinary_url:
+            instance.image = cloudinary_url
+            instance.save(update_fields=['image'])
+
 
 class StaffViewSet(viewsets.ModelViewSet):
     queryset = User.objects.filter(is_staff=True, is_superuser=False).order_by('-date_joined')
@@ -511,3 +549,40 @@ class PricingConfigView(APIView):
             defaults={'pricing_data': data}
         )
         return Response(cfg.pricing_data, status=status.HTTP_200_OK)
+
+
+class VerifyAdminView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if not (user.is_staff or user.is_superuser):
+            return Response(
+                {"error": "Forbidden. Staff or superuser access required."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return Response({
+            "status": "ok",
+            "username": user.username,
+            "email": user.email,
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+        }, status=status.HTTP_200_OK)
+
+
+class VerifyStaffView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if not (user.is_staff or user.is_superuser):
+            return Response(
+                {"error": "Forbidden. Staff or superuser access required."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return Response({
+            "status": "ok",
+            "username": user.username,
+            "email": user.email,
+            "is_staff": user.is_staff,
+        }, status=status.HTTP_200_OK)

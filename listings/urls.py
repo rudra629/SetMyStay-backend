@@ -10,6 +10,8 @@ from .views import (
     MyPurchasesView,
     AllPurchasesAdminView,
     PricingConfigView,
+    VerifyAdminView,
+    VerifyStaffView,
 )
 
 router = DefaultRouter()
@@ -31,4 +33,6 @@ urlpatterns = [
     path('payments/all-history/', AllPurchasesAdminView.as_view(), name='all-purchases'),
     path('payments/verify-local/', VerifyLocalPaymentView.as_view(), name='verify-local'),
     path('pricing/', PricingConfigView.as_view(), name='pricing-config'),
+    path('auth/verify-admin/', VerifyAdminView.as_view(), name='verify-admin'),
+    path('auth/verify-staff/', VerifyStaffView.as_view(), name='verify-staff'),
 ]
