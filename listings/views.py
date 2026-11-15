@@ -598,6 +598,10 @@ class UnlockListingView(APIView):
         if UserUnlock.objects.filter(user=user, property_id=property_id).exists():
             return Response({'status': 'already_unlocked', 'plan': get_entitlement(user)}, status=status.HTTP_200_OK)
 
+        # Only real, live listings can be unlocked (so a paid credit is never spent on nothing)
+        if not property_id.isdigit() or not Property.objects.filter(id=int(property_id), status='APPROVED').exists():
+            return Response({'error': 'This listing is not available.'}, status=status.HTTP_404_NOT_FOUND)
+
         plan = get_entitlement(user)
         if not plan['is_unlimited'] and plan['credits_left'] <= 0:
             return Response({'error': 'No unlock credits left. Please buy a plan.', 'plan': plan},
@@ -668,6 +672,21 @@ class SwipesView(APIView):
             usage.count += 1
             usage.save(update_fields=['count'])
         return Response(self._state(usage, cfg))
+
+
+class SwipeUndoView(APIView):
+    """Undo on the swipe deck gives the last swipe back (never below 0, today's count only)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        cfg = get_app_settings()
+        view = SwipesView()
+        with transaction.atomic():
+            usage = view._usage(request.user, lock=True)
+            if usage.count > 0:
+                usage.count -= 1
+                usage.save(update_fields=['count'])
+        return Response(view._state(usage, cfg))
 
 
 class PricingConfigView(APIView):
