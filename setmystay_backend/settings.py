@@ -156,7 +156,25 @@ STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # --- CORS CONFIGURATION ---
-CORS_ALLOW_ALL_ORIGINS = True
+# Only our own website (and its preview / editor builds) may call the API from a browser.
+# Add a custom domain later with the CORS_EXTRA_ORIGINS env var, e.g. "https://setmystay.in,https://www.setmystay.in".
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = [
+    'https://set-my-stay-frontend-new.vercel.app',
+    'https://set-my-stay-frontend-xwgp.vercel.app',
+    'https://setmystay-backend.onrender.com',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+] + [o.strip().rstrip('/') for o in os.environ.get('CORS_EXTRA_ORIGINS', '').split(',') if o.strip()]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r'^https://set-my-stay-frontend-new(-[a-z0-9-]+)?\.vercel\.app$',   # Vercel preview builds
+    r'^https://[a-z0-9-]+\.lovable\.app$',                               # Lovable editor preview
+    r'^https://[a-z0-9-]+\.lovableproject\.com$',
+]
 CORS_ALLOW_CREDENTIALS = True
 
 # --- CLOUDINARY MEDIA & STORAGE CONFIGURATION ---
