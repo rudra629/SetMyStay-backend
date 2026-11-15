@@ -203,9 +203,11 @@ class AdminLoginOTP(models.Model):
     expires_at = models.DateTimeField()
     attempts = models.IntegerField(default=0)
     used = models.BooleanField(default=False)
+    # 'login' = admin sign-in code, 'reset' = forgot-password code (one can't be used for the other)
+    purpose = models.CharField(max_length=10, default='login')
 
     def __str__(self):
-        return f"OTP for {self.user.username} ({'used' if self.used else 'open'})"
+        return f"{self.purpose} OTP for {self.user.username} ({'used' if self.used else 'open'})"
 
 
 class TrustedAdminDevice(models.Model):

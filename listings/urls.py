@@ -2,7 +2,10 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from . import views
-from .admin_auth import NoAdminTokenObtainPairView, AdminLoginView, AdminVerifyOTPView, AdminForgetDevicesView
+from .admin_auth import (
+    NoAdminTokenObtainPairView, AdminLoginView, AdminVerifyOTPView, AdminForgetDevicesView,
+    AdminForgotPasswordView, AdminResetPasswordView,
+)
 from .views import (
     CreateRazorpayOrderView,
     RazorpayWebhookView,
@@ -38,6 +41,8 @@ urlpatterns = [
     path('auth/login/', NoAdminTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/admin/login/', AdminLoginView.as_view(), name='admin-login'),
     path('auth/admin/verify-otp/', AdminVerifyOTPView.as_view(), name='admin-verify-otp'),
+    path('auth/admin/forgot-password/', AdminForgotPasswordView.as_view(), name='admin-forgot-password'),
+    path('auth/admin/reset-password/', AdminResetPasswordView.as_view(), name='admin-reset-password'),
     path('auth/admin/forget-devices/', AdminForgetDevicesView.as_view(), name='admin-forget-devices'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('payments/create-order/', CreateRazorpayOrderView.as_view(), name='create-order'),
