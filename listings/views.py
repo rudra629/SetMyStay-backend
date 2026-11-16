@@ -385,16 +385,21 @@ class StaffViewSet(viewsets.ModelViewSet):
                 if r.reviewed_at and r.created_at:
                     total_duration += (r.reviewed_at - r.created_at)
 
+            # Average time a listing waited between being submitted and this staff member reviewing it
             avg_hours = "N/A"
+            avg_minutes = None
             if total_reviews > 0:
                 avg_td = total_duration / total_reviews
                 avg_hours = round(avg_td.total_seconds() / 3600, 1)
+                avg_minutes = max(0, round(avg_td.total_seconds() / 60))
 
             serializer = self.get_serializer(staff)
             staff_data = serializer.data
             staff_data['approved_count'] = approved_count
             staff_data['rejected_count'] = rejected_count
             staff_data['avg_processing_hours'] = avg_hours
+            staff_data['avg_review_wait_minutes'] = avg_minutes
+            staff_data['reviews_count'] = total_reviews
 
             data.append(staff_data)
 
@@ -877,6 +882,35 @@ class SiteThemeView(APIView):
             theme[k] = v
         PricingConfig.objects.update_or_create(key='site_theme', defaults={'pricing_data': theme})
         return Response({'theme': theme}, status=status.HTTP_200_OK)
+
+
+class VendorNumbersView(APIView):
+    """Vendor numbers created in the admin panel (kept on the server so every admin device sees them).
+    GET: staff/admin. POST {"vendor_number": "..."}: main admin only."""
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsSuperAdmin()]
+        return [IsStaffOrAdmin()]
+
+    @staticmethod
+    def _numbers():
+        cfg = PricingConfig.objects.filter(key='vendor_numbers').first()
+        return list(((cfg.pricing_data if cfg else None) or {}).get('numbers') or [])
+
+    def get(self, request):
+        return Response({'numbers': self._numbers()}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        number = str(request.data.get('vendor_number') or '').strip()
+        if not number or len(number) > 50:
+            return Response({'error': 'Enter a vendor number (up to 50 characters).'}, status=status.HTTP_400_BAD_REQUEST)
+        numbers = self._numbers()
+        if number in numbers or Property.objects.filter(vendor_number=number).exists():
+            return Response({'error': 'This vendor number already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+        numbers.append(number)
+        PricingConfig.objects.update_or_create(key='vendor_numbers', defaults={'pricing_data': {'numbers': numbers}})
+        return Response({'numbers': numbers}, status=status.HTTP_201_CREATED)
 
 
 class MyFavoritesView(APIView):

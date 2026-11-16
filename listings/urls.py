@@ -24,6 +24,7 @@ from .views import (
     SwipeUndoView,
     SiteContactView,
     SiteThemeView,
+    VendorNumbersView,
     MyFavoritesView,
 )
 
@@ -57,6 +58,7 @@ urlpatterns = [
     path('payments/unlock-listing/', UnlockListingView.as_view(), name='unlock-listing'),
     path('site-contact/', SiteContactView.as_view(), name='site-contact'),
     path('site-theme/', SiteThemeView.as_view(), name='site-theme'),
+    path('vendor-numbers/', VendorNumbersView.as_view(), name='vendor-numbers'),
     path('swipes/undo/', SwipeUndoView.as_view(), name='swipes-undo'),
     path('swipes/', SwipesView.as_view(), name='swipes'),
     path('pricing/', PricingConfigView.as_view(), name='pricing-config'),
