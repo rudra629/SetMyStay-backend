@@ -27,6 +27,7 @@ from .models import (
     PricingConfig,
     UserUnlock,
     SwipeUsage,
+    SlotSpin
 )
 from .permissions import (
     IsStaffOrAdmin, IsSuperAdmin, ReadOnlyOrSuperAdmin, ReadOnlyOrStaff, IsOwnerOrStaff, is_staff_user,
@@ -98,9 +99,44 @@ class PropertyViewSet(viewsets.ModelViewSet):
         else:
             serializer.save(status=serializer.instance.status)
 
+    def create(self, request, *args, **kwargs):
+        # A listing needs its listing fee paid first (one paid fee = one listing). Staff/admin are exempt.
+        if not is_staff_user(request.user):
+            fee = self._unused_listing_fee(request)
+            if fee is None:
+                return Response({'error': 'Please pay the listing fee before submitting your listing.',
+                                 'code': 'listing_fee_required'}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            request._listing_fee = fee
+        return super().create(request, *args, **kwargs)
+
+    def _unused_listing_fee(self, request):
+        fees = Purchase.objects.filter(user=request.user, status='SUCCESS', consumed=False,
+                                       plan_name__icontains='listing').order_by('created_at')
+        # The fee must be at least this listing type's price (less the best active coupon)
+        ptype = str(request.data.get('property_type') or '').strip().lower()
+        key = {'pg': 'pg', 'rental': 'rental', 'roommate': 'roommate'}.get(ptype)
+        if key:
+            cfg = PricingConfig.objects.filter(key='global_pricing').first()
+            prices = (cfg.pricing_data if cfg and cfg.pricing_data else DEFAULT_PRICING).get('listings', {}) or {}
+            full = float(prices.get(key) or (DEFAULT_PRICING.get('listings') or {}).get(key) or 0)
+            best = Coupon.objects.filter(is_active=True).order_by('-discount_percentage').first()
+            discount = min(max((best.discount_percentage if best else 0), 0), 90) / 100
+            fees = fees.filter(amount__gte=max(0, full * (1 - discount) - 1))
+        payment_id = str(request.data.get('payment_id') or '').strip()
+        if payment_id:
+            chosen = fees.filter(razorpay_payment_id=payment_id).first()
+            if chosen:
+                return chosen
+        return fees.first()
+
     def perform_create(self, serializer):
         # 1. Save main property data with status='PENDING'
         property_instance = serializer.save(owner=self.request.user, status='PENDING')
+        fee = getattr(self.request, '_listing_fee', None)
+        if fee is not None:
+            fee.consumed = True
+            fee.listing = property_instance
+            fee.save(update_fields=['consumed', 'listing'])
 
         # 2. Upload images to Cloudinary (with fallback to default storage)
         images = self.request.FILES.getlist('uploaded_images')
@@ -676,7 +712,8 @@ class SwipesView(APIView):
         if usage.window_start.astimezone(IST).date() != today_ist:
             usage.count = 0
             usage.window_start = timezone.now()
-            usage.save(update_fields=['count', 'window_start'])
+            usage.can_undo = False
+            usage.save(update_fields=['count', 'window_start', 'can_undo'])
         return usage
 
     def get(self, request):
@@ -690,12 +727,13 @@ class SwipesView(APIView):
             if usage.count >= cfg['swipe_limit']:
                 return Response({**self._state(usage, cfg), 'error': 'No swipes left'}, status=status.HTTP_429_TOO_MANY_REQUESTS)
             usage.count += 1
-            usage.save(update_fields=['count'])
+            usage.can_undo = True
+            usage.save(update_fields=['count', 'can_undo'])
         return Response(self._state(usage, cfg))
 
 
 class SwipeUndoView(APIView):
-    """Undo on the swipe deck gives the last swipe back (never below 0, today's count only)."""
+    """Undo on the swipe deck gives the last swipe back: once, right after a swipe (never below 0)."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -703,10 +741,49 @@ class SwipeUndoView(APIView):
         view = SwipesView()
         with transaction.atomic():
             usage = view._usage(request.user, lock=True)
-            if usage.count > 0:
-                usage.count -= 1
-                usage.save(update_fields=['count'])
+            if not usage.can_undo or usage.count <= 0:
+                return Response({**view._state(usage, cfg), 'error': 'Nothing to undo'}, status=status.HTTP_409_CONFLICT)
+            usage.count -= 1
+            usage.can_undo = False
+            usage.save(update_fields=['count', 'can_undo'])
         return Response(view._state(usage, cfg))
+
+
+class SlotMachineView(APIView):
+    """Slot machine for signed-in users. The server decides when you may play again and whether you win,
+    so a private window or cleared browser data can't give extra spins.
+    GET -> {can_spin, next_spin_at, lucky}. POST -> {win, near_miss, next_spin_at} or 429 while waiting."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    @staticmethod
+    def _next(spin, cfg):
+        if not spin.last_spin_at:
+            return None
+        nxt = spin.last_spin_at + timedelta(hours=max(1, int(cfg.get('slot_cooldown_hours') or 24)))
+        return nxt if nxt > timezone.now() else None
+
+    def get(self, request):
+        cfg = get_app_settings()
+        spin, _ = SlotSpin.objects.get_or_create(user=request.user)
+        nxt = self._next(spin, cfg)
+        return Response({'can_spin': nxt is None, 'next_spin_at': nxt.isoformat() if nxt else None, 'lucky': spin.lucky_next})
+
+    def post(self, request):
+        import secrets
+        cfg = get_app_settings()
+        with transaction.atomic():
+            spin, _ = SlotSpin.objects.select_for_update().get_or_create(user=request.user)
+            nxt = self._next(spin, cfg)
+            if nxt is not None:
+                return Response({'error': 'Please wait for your next spin.', 'next_spin_at': nxt.isoformat()},
+                                status=status.HTTP_429_TOO_MANY_REQUESTS)
+            win = spin.lucky_next or secrets.randbelow(100) < 50
+            near_miss = (not win) and secrets.randbelow(100) < 40   # two matching symbols: next spin is lucky
+            spin.lucky_next = near_miss
+            spin.last_spin_at = timezone.now()
+            spin.save()
+            nxt = self._next(spin, cfg)
+        return Response({'win': win, 'near_miss': near_miss, 'next_spin_at': nxt.isoformat() if nxt else None})
 
 
 class PricingConfigView(APIView):

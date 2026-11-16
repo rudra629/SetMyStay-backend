@@ -158,6 +158,9 @@ class Purchase(models.Model):
     razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
     status = models.CharField(max_length=20, default='SUCCESS')
     created_at = models.DateTimeField(auto_now_add=True)
+    # Listing fees: each paid fee can create one listing. 'consumed' once used (or for fees paid before this rule).
+    consumed = models.BooleanField(default=False)
+    listing = models.ForeignKey('Property', null=True, blank=True, on_delete=models.SET_NULL, related_name='fee_purchases')
 
     def __str__(self):
         return f"{self.user.username} - {self.plan_name} - ₹{self.amount}"
@@ -189,6 +192,8 @@ class SwipeUsage(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='swipe_usage')
     count = models.IntegerField(default=0)
     window_start = models.DateTimeField(auto_now_add=True)
+    # Undo is allowed once, right after a swipe (stops unlimited free swipes via the undo endpoint)
+    can_undo = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.user.username}: {self.count} swipes"
@@ -221,3 +226,13 @@ class TrustedAdminDevice(models.Model):
 
     def __str__(self):
         return f"{self.user.username} device ({self.label[:40]})"
+
+
+class SlotSpin(models.Model):
+    """When a user last played the slot machine, and whether their next spin is a guaranteed 'lucky' one."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='slot_spin')
+    last_spin_at = models.DateTimeField(null=True, blank=True)
+    lucky_next = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.user.username}: last spin {self.last_spin_at}"
