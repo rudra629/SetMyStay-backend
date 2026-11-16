@@ -91,6 +91,13 @@ class PropertyViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(self.get_serializer(instance).data)
 
+    def perform_update(self, serializer):
+        # Only staff can change a listing's review status (owners can't approve their own listing).
+        if is_staff_user(self.request.user):
+            serializer.save()
+        else:
+            serializer.save(status=serializer.instance.status)
+
     def perform_create(self, serializer):
         # 1. Save main property data with status='PENDING'
         property_instance = serializer.save(owner=self.request.user, status='PENDING')
@@ -251,6 +258,13 @@ class RoommateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user, status='PENDING')
+
+    def perform_update(self, serializer):
+        # Owners can edit their profile but not approve it or hand it to another user.
+        if is_staff_user(self.request.user):
+            serializer.save()
+        else:
+            serializer.save(status=serializer.instance.status, user=serializer.instance.user)
 
     @action(detail=True, methods=['post'], permission_classes=[IsStaffOrAdmin])
     def update_status(self, request, pk=None):
