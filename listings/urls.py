@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from . import views
 from .admin_auth import (
-    NoAdminTokenObtainPairView, AdminLoginView, AdminVerifyOTPView, AdminForgetDevicesView,
+    NoAdminTokenObtainPairView, AdminLoginView, AdminVerifyOTPView, AdminForgetDevicesView, AdminForgetThisDeviceView,
     AdminForgotPasswordView, AdminResetPasswordView,
 )
 from .views import (
@@ -47,6 +47,7 @@ urlpatterns = [
     path('auth/admin/forgot-password/', AdminForgotPasswordView.as_view(), name='admin-forgot-password'),
     path('auth/admin/reset-password/', AdminResetPasswordView.as_view(), name='admin-reset-password'),
     path('auth/admin/forget-devices/', AdminForgetDevicesView.as_view(), name='admin-forget-devices'),
+    path('auth/admin/forget-this-device/', AdminForgetThisDeviceView.as_view(), name='admin-forget-this-device'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('payments/create-order/', CreateRazorpayOrderView.as_view(), name='create-order'),
     path('payments/webhook/', RazorpayWebhookView.as_view(), name='razorpay-webhook'),

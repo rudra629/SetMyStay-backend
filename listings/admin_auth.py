@@ -218,6 +218,22 @@ class AdminForgetDevicesView(APIView):
         return Response({'status': 'success', 'removed': n}, status=status.HTTP_200_OK)
 
 
+class AdminForgetThisDeviceView(APIView):
+    """Admin > 'Require code on this device': this browser stops skipping the email code.
+    Body: {"device_token": "<this browser's remembered-device token>"}"""
+
+    def get_permissions(self):
+        from .permissions import IsSuperAdmin
+        return [IsSuperAdmin()]
+
+    def post(self, request):
+        token = str(request.data.get('device_token') or '').strip()
+        removed = 0
+        if token:
+            removed, _ = TrustedAdminDevice.objects.filter(user=request.user, token_hash=_hash(token)).delete()
+        return Response({'status': 'success', 'removed': removed}, status=status.HTTP_200_OK)
+
+
 def _code_email_html(title, intro, code, footer):
     return f"""
         <div style="font-family:Arial,sans-serif;max-width:420px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:12px">
