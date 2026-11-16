@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 import razorpay
@@ -830,6 +831,38 @@ class SiteContactView(APIView):
         data = {'email': email, 'phone': phone, 'address': address}
         PricingConfig.objects.update_or_create(key='site_contact', defaults={'pricing_data': data})
         return Response(data, status=status.HTTP_200_OK)
+
+
+THEME_COLOR_KEYS = ('background', 'foreground', 'card', 'cardForeground', 'primary',
+                    'primaryForeground', 'accent', 'accentForeground')
+
+
+class SiteThemeView(APIView):
+    """Property card colours chosen in the admin panel. Everyone reads them; only the main admin changes them.
+    POST a theme to save it, or POST {"reset": true} to go back to the original colours."""
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsSuperAdmin()]
+        return [permissions.AllowAny()]
+
+    def get(self, request):
+        cfg = PricingConfig.objects.filter(key='site_theme').first()
+        return Response({'theme': (cfg.pricing_data if cfg else None) or None}, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        if request.data.get('reset'):
+            PricingConfig.objects.filter(key='site_theme').delete()
+            return Response({'theme': None}, status=status.HTTP_200_OK)
+        hex_re = re.compile(r'^#[0-9a-fA-F]{6}$')
+        theme = {'name': str(request.data.get('name') or 'Custom')[:60]}
+        for k in THEME_COLOR_KEYS:
+            v = str(request.data.get(k) or '').strip()
+            if not hex_re.match(v):
+                return Response({'error': f'Invalid colour for {k}.'}, status=status.HTTP_400_BAD_REQUEST)
+            theme[k] = v
+        PricingConfig.objects.update_or_create(key='site_theme', defaults={'pricing_data': theme})
+        return Response({'theme': theme}, status=status.HTTP_200_OK)
 
 
 class MyFavoritesView(APIView):
