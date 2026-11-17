@@ -98,7 +98,7 @@ class AdvertisementSerializer(serializers.ModelSerializer):
     class Meta:
         model = Advertisement
         # Make sure 'image' is added to this list!
-        fields = ['id', 'title', 'description', 'imageUrl', 'image', 'is_active', 'created_at']
+        fields = ['id', 'title', 'description', 'imageUrl', 'image', 'is_active', 'coupon_codes', 'created_at']
 
 # 👇 ADD THIS TO THE BOTTOM 👇
 class StaffSerializer(serializers.ModelSerializer):

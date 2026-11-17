@@ -146,6 +146,8 @@ class Advertisement(models.Model):
     description = models.TextField()
     image = models.ImageField(upload_to='advertisements/', max_length=500)
     is_active = models.BooleanField(default=False)
+    # Coupon codes shown on the pop-up with a Copy button (comma-separated)
+    coupon_codes = models.CharField(max_length=300, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
