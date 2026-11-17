@@ -73,3 +73,29 @@ def get_entitlement(user):
         'unlimited_expires_at': unlimited_expires_at.isoformat() if unlimited_expires_at else None,
         'unlocked_ids': [u.property_id for u in unlocks],
     }
+
+
+def current_tier(ent):
+    """'unlimited' while Ultimate is active, else the biggest pack size the unused credits still cover (0 = none)."""
+    if ent.get('is_unlimited'):
+        return 'unlimited'
+    left = ent.get('credits_left') or 0
+    return 10 if left >= 10 else 5 if left >= 5 else 1 if left >= 1 else 0
+
+
+def plan_block_reason(user, plan_name):
+    """Why this user can't buy this unlock plan right now (None = allowed).
+    Ultimate active: nothing until it ends. Unused credits: no smaller pack (upgrades are fine)."""
+    kind, n = plan_credits(plan_name)
+    if kind is None:
+        return None
+    ent = get_entitlement(user)
+    tier = current_tier(ent)
+    if tier == 'unlimited':
+        until = (ent.get('unlimited_expires_at') or '')[:10]
+        if kind == 'unlimited':
+            return f'You already have the Ultimate plan (active until {until}).'
+        return f'Your Ultimate plan already includes unlimited unlocks (until {until}).'
+    if kind == 'credits' and tier and n < tier:
+        return f'You still have {ent.get("credits_left")} unlocks left. You can only upgrade to a bigger plan.'
+    return None

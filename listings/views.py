@@ -458,6 +458,12 @@ class CreateRazorpayOrderView(APIView):
             if parsed_amount <= 0:
                 return Response({"error": "Amount must be greater than zero"}, status=status.HTTP_400_BAD_REQUEST)
 
+            # Unlock plans: no buying a lower plan (or Ultimate again) while a plan is active
+            if pricing_key_for_plan(plan_name):
+                from .entitlements import plan_block_reason
+                reason = plan_block_reason(request.user, plan_name)
+                if reason:
+                    return Response({"error": reason, "code": "plan_not_allowed"}, status=status.HTTP_409_CONFLICT)
             # Unlock plans: the price must match the admin's pricing (minus at most the best active coupon)
             if pricing_key_for_plan(plan_name) and parsed_amount + 1 < minimum_plan_price(plan_name):
                 return Response({"error": "Amount does not match the plan price"}, status=status.HTTP_400_BAD_REQUEST)
