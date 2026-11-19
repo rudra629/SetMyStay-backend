@@ -16,6 +16,7 @@ from rest_framework.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Prefetch
 from django.core.cache import cache
+from django.contrib.auth.models import AnonymousUser
 from .roommate_form import flatten_details
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -150,16 +151,46 @@ class PropertyViewSet(viewsets.ModelViewSet):
     PUBLIC_LIST_SECONDS = 30
 
     def list(self, request, *args, **kwargs):
-        if (request.user and request.user.is_authenticated) or request.query_params.get('admin') == 'true':
+        # Admin / staff always get a fresh, full list
+        if request.query_params.get('admin') == 'true' or is_staff_user(request.user):
             return super().list(request, *args, **kwargs)
         key = 'public-properties:' + request.get_full_path()
         data = cache.get(key)
-        if data is not None:
+        if data is None:
+            # Build the public (signed-out) version once and share it for a few seconds
+            real_user = request.user
+            request.user = AnonymousUser()
+            try:
+                response = super().list(request, *args, **kwargs)
+            finally:
+                request.user = real_user
+                if hasattr(request, '_setmystay_unlocked_ids'):
+                    del request._setmystay_unlocked_ids
+            if response.status_code != 200:
+                return response
+            data = response.data
+            cache.set(key, data, self.PUBLIC_LIST_SECONDS)
+        user = request.user
+        if not (user and user.is_authenticated):
             return Response(data)
-        response = super().list(request, *args, **kwargs)
-        if response.status_code == 200:
-            cache.set(key, response.data, self.PUBLIC_LIST_SECONDS)
-        return response
+        # Signed in: only the listings this user owns or unlocked look different (contacts, documents)
+        results = data.get('results') if isinstance(data, dict) else data
+        if not results:
+            return Response(data)
+        ids = [r.get('id') for r in results]
+        unlocked = UserUnlock.objects.filter(user=user, property_id__in=[str(i) for i in ids]).values_list('property_id', flat=True)
+        personal = {int(x) for x in unlocked if str(x).isdigit()}
+        personal |= set(Property.objects.filter(owner=user, id__in=ids).values_list('id', flat=True))
+        if not personal:
+            return Response(data)
+        objs = list(self.get_queryset().filter(id__in=personal))
+        fresh = {d['id']: d for d in self.get_serializer(objs, many=True).data}
+        merged = [fresh.get(r.get('id'), r) for r in results]
+        if isinstance(data, dict):
+            out = dict(data)
+            out['results'] = merged
+            return Response(out)
+        return Response(merged)
 
     def retrieve(self, request, *args, **kwargs):
         # Non-approved listings are only visible to their owner and staff
