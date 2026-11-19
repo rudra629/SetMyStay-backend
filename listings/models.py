@@ -98,6 +98,13 @@ class Property(models.Model):
     roommate_details = models.JSONField(default=dict, blank=True)
     # Last time the owner changed this listing after it was approved (shown to admin/staff only)
     edited_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            # The public lists filter by status (and type) and sort newest first
+            models.Index(fields=['status', '-created_at'], name='prop_status_created_idx'),
+            models.Index(fields=['property_type', 'status'], name='prop_type_status_idx'),
+        ]
     
     def __str__(self):
         return f"{self.title} ({self.status})"

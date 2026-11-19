@@ -15,6 +15,7 @@ from rest_framework import viewsets, filters, permissions, parsers, generics, st
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Prefetch
+from django.core.cache import cache
 from .roommate_form import flatten_details
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -137,10 +138,28 @@ class PropertyViewSet(viewsets.ModelViewSet):
         is_admin_view = self.request.query_params.get('admin') == 'true'
         if is_admin_view and is_staff_user(self.request.user):
             return Property.objects.all().order_by('-created_at').prefetch_related(
+                'images', 'amenities',
                 Prefetch('edits', queryset=ListingEdit.objects.filter(cleared=False).order_by('created_at'),
                          to_attr='_prefetched_edits'))
 
-        return Property.objects.filter(status='APPROVED').order_by('-created_at')
+        # Lists: load photos and amenities in 2 queries in total, not 2 per listing
+        return Property.objects.filter(status='APPROVED').order_by('-created_at').prefetch_related('images', 'amenities')
+
+    # Signed-out visitors all get the same public list, so it is kept for a short time instead of
+    # being rebuilt from the database on every visit (big win with many visitors).
+    PUBLIC_LIST_SECONDS = 30
+
+    def list(self, request, *args, **kwargs):
+        if (request.user and request.user.is_authenticated) or request.query_params.get('admin') == 'true':
+            return super().list(request, *args, **kwargs)
+        key = 'public-properties:' + request.get_full_path()
+        data = cache.get(key)
+        if data is not None:
+            return Response(data)
+        response = super().list(request, *args, **kwargs)
+        if response.status_code == 200:
+            cache.set(key, response.data, self.PUBLIC_LIST_SECONDS)
+        return response
 
     def retrieve(self, request, *args, **kwargs):
         # Non-approved listings are only visible to their owner and staff
@@ -424,7 +443,7 @@ class RoommateListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        return Property.objects.filter(property_type='ROOMMATE', status='APPROVED')
+        return Property.objects.filter(property_type='ROOMMATE', status='APPROVED').prefetch_related('images', 'amenities')
 
 
 class MyPropertiesView(generics.ListAPIView):
@@ -432,7 +451,7 @@ class MyPropertiesView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Property.objects.filter(owner=self.request.user).order_by('-created_at')
+        return Property.objects.filter(owner=self.request.user).order_by('-created_at').prefetch_related('images', 'amenities')
 
 
 class CouponViewSet(viewsets.ModelViewSet):
