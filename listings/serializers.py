@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Property, Amenity, ListingImage, RoommateProfile, Coupon, Advertisement # Make sure to import them!
 from django.contrib.auth.models import User
 from .models import Purchase, HeroBannerAd
+from .roommate_form import clean_roommate_details, public_roommate_details
 # 1. Image Serializer
 class ListingImageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -21,7 +22,7 @@ class PropertySerializer(serializers.ModelSerializer):
     
     # We also allow sending amenity IDs when creating a listing
     amenity_ids = serializers.PrimaryKeyRelatedField(
-        queryset=Amenity.objects.all(), many=True, write_only=True, source='amenities'
+        queryset=Amenity.objects.all(), many=True, write_only=True, source='amenities', required=False
     )
     
     # ❌ (I completely removed the line that was hijacking your username!)
@@ -39,8 +40,10 @@ class PropertySerializer(serializers.ModelSerializer):
             # 👇 ADDED: The new contact fields from your model
             'owner_name', 'phone_primary', 'phone_secondary',
             'document_aadhaar', 'document_electricity', 'document_noc',
-            'images', 'amenities', 'amenity_ids', 'created_at'
+            'images', 'amenities', 'amenity_ids', 'created_at',
+            'roommate_details', 'edited_at',
         ]
+        read_only_fields = ['edited_at']
 
     # Contact details are only sent to: the owner, staff/admin, or a user who unlocked it.
     # Verification documents are only sent to the owner and staff/admin.
@@ -59,6 +62,43 @@ class PropertySerializer(serializers.ModelSerializer):
             request._setmystay_unlocked_ids = cached
         return cached
 
+    def validate_roommate_details(self, value):
+        if value in (None, ''):
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Invalid roommate details.')
+        import json
+        if len(json.dumps(value)) > 20000:
+            raise serializers.ValidationError('Roommate details are too long.')
+        cleaned, missing = clean_roommate_details(value)
+        self._roommate_missing = missing
+        return cleaned
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        ptype = attrs.get('property_type') or (self.instance.property_type if self.instance else '')
+        if self.instance is not None and 'property_type' in attrs and attrs['property_type'] != self.instance.property_type:
+            request = self.context.get('request')
+            user = getattr(request, 'user', None)
+            if not (user and (user.is_staff or user.is_superuser)):
+                raise serializers.ValidationError({'property_type': 'The listing type cannot be changed.'})
+        if str(ptype).upper() == 'ROOMMATE':
+            details = attrs.get('roommate_details')
+            if self.instance is None and not details:
+                raise serializers.ValidationError({'roommate_details': 'Please fill in the roommate questions.'})
+            if details:
+                missing = getattr(self, '_roommate_missing', [])
+                if missing:
+                    raise serializers.ValidationError({'roommate_details': 'Please answer: ' + ', '.join(missing[:4]) + ('…' if len(missing) > 4 else '')})
+                # Keep the card / filter fields in step with the answers
+                attrs['owner_name'] = details.get('first_name') or attrs.get('owner_name')
+                attrs['age'] = details.get('age') or attrs.get('age')
+                attrs['gender_preference'] = {'male': 'Male', 'female': 'Female', 'nonbinary': 'Other'}.get(details.get('gender'), 'Any')
+                attrs['sharing_status'] = 'Living in' if details.get('has_place') == 'has_place' else 'Moving soon'
+        elif attrs.get('roommate_details'):
+            attrs['roommate_details'] = {}
+        return attrs
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         request = self.context.get('request')
@@ -66,14 +106,39 @@ class PropertySerializer(serializers.ModelSerializer):
         logged_in = bool(user and user.is_authenticated)
         is_staff = logged_in and (user.is_staff or user.is_superuser)
         is_owner = logged_in and instance.owner_id == user.id
-        if is_staff or is_owner:
+        if is_staff:
+            # Admin / staff only: edit tracking (normal users never see whether a listing was edited)
+            data['pending_edits'] = self._pending_edits(instance)
             return data
+        data.pop('edited_at', None)
+        if is_owner:
+            return data
+        unlocked = bool(request and str(instance.id) in self._unlocked_ids(request))
+        data['roommate_details'] = public_roommate_details(instance.roommate_details or {}, can_see_private=unlocked)
         for f in self.DOCUMENT_FIELDS:
             data[f] = None
-        if not (request and str(instance.id) in self._unlocked_ids(request)):
+        if not unlocked:
             for f in self.CONTACT_FIELDS:
                 data[f] = None
         return data
+
+    @staticmethod
+    def _pending_edits(instance):
+        """Changes from the not-yet-cleared edit notifications, merged per field (first old -> latest new)."""
+        merged = {}
+        edits = getattr(instance, '_prefetched_edits', None)
+        if edits is None:
+            edits = list(instance.edits.filter(cleared=False).order_by('created_at'))
+        for e in edits:
+            for c in (e.changes or []):
+                f = c.get('field')
+                if not f:
+                    continue
+                if f in merged:
+                    merged[f]['new'] = c.get('new')
+                else:
+                    merged[f] = {'field': f, 'old': c.get('old'), 'new': c.get('new')}
+        return [m for m in merged.values() if m['old'] != m['new']]
 
 # 4. Roommate Profile Serializer
 class RoommateProfileSerializer(serializers.ModelSerializer):

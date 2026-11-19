@@ -13,6 +13,9 @@ from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, filters, permissions, parsers, generics, status
 from rest_framework.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Prefetch
+from .roommate_form import flatten_details
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -30,6 +33,7 @@ from .models import (
     SwipeUsage,
     SlotSpin,
     HeroBannerAd,
+    ListingEdit,
 )
 from .permissions import (
     IsStaffOrAdmin, IsSuperAdmin, ReadOnlyOrSuperAdmin, ReadOnlyOrStaff, IsOwnerOrStaff, is_staff_user,
@@ -45,6 +49,44 @@ from .serializers import (
     StaffSerializer,
     HeroBannerAdSerializer,
 )
+
+
+# Fields compared when an owner edits a listing (what admin/staff see in Notifications)
+TRACKED_FIELDS = ('title', 'description', 'rent', 'deposit', 'is_negotiable', 'state', 'city', 'area', 'address',
+                  'vendor_number', 'bhk', 'furnishing', 'sq_ft', 'occupancy_type', 'gender_preference', 'age',
+                  'sharing_status', 'is_broker', 'owner_name', 'phone_primary', 'phone_secondary')
+DOC_FIELDS = ('document_aadhaar', 'document_electricity', 'document_noc')
+
+
+def _plain(v):
+    if v is None:
+        return ''
+    if isinstance(v, bool):
+        return 'Yes' if v else 'No'
+    return v if isinstance(v, (int, float, list)) else str(v).strip()
+
+
+def listing_snapshot(p):
+    snap = {f: _plain(getattr(p, f, None)) for f in TRACKED_FIELDS}
+    for f in DOC_FIELDS:
+        val = getattr(p, f, None)
+        snap[f] = str(getattr(val, 'name', val) or '')
+    snap['amenities'] = ', '.join(sorted(p.amenities.values_list('name', flat=True)))
+    snap['photos'] = list(p.images.filter(is_video=False).exclude(image_url__contains='placehold.co')
+                          .order_by('id').values_list('image_url', flat=True))
+    snap['video'] = p.images.filter(is_video=True).values_list('image_url', flat=True).first() or ''
+    if p.property_type == 'ROOMMATE':
+        snap.update({k: _plain(v) for k, v in flatten_details(p.roommate_details or {}).items()})
+    return snap
+
+
+def diff_snapshots(before, after):
+    changes = []
+    for k in list(before.keys()) + [k for k in after.keys() if k not in before]:
+        old, new = before.get(k, ''), after.get(k, '')
+        if str(old) != str(new):
+            changes.append({'field': k, 'old': old, 'new': new})
+    return changes
 
 
 def minimum_plan_price(plan_name):
@@ -84,7 +126,9 @@ class PropertyViewSet(viewsets.ModelViewSet):
 
         is_admin_view = self.request.query_params.get('admin') == 'true'
         if is_admin_view and is_staff_user(self.request.user):
-            return Property.objects.all().order_by('-created_at')
+            return Property.objects.all().order_by('-created_at').prefetch_related(
+                Prefetch('edits', queryset=ListingEdit.objects.filter(cleared=False).order_by('created_at'),
+                         to_attr='_prefetched_edits'))
 
         return Property.objects.filter(status='APPROVED').order_by('-created_at')
 
@@ -99,8 +143,21 @@ class PropertyViewSet(viewsets.ModelViewSet):
         # Only staff can change a listing's review status (owners can't approve their own listing).
         if is_staff_user(self.request.user):
             serializer.save()
-        else:
-            serializer.save(status=serializer.instance.status)
+            self._save_media(serializer.instance, replacing=True)
+            return
+        instance = serializer.instance
+        was_approved = instance.status == Property.Status.APPROVED
+        before = listing_snapshot(instance)
+        with transaction.atomic():
+            serializer.save(status=instance.status, owner=instance.owner)
+            self._save_media(instance, replacing=True)
+            instance.refresh_from_db()
+            changes = diff_snapshots(before, listing_snapshot(instance))
+            # Owner changed an approved listing: tell admin/staff (Notifications tab)
+            if was_approved and changes:
+                ListingEdit.objects.create(property=instance, editor=self.request.user, changes=changes)
+                instance.edited_at = timezone.now()
+                instance.save(update_fields=['edited_at'])
 
     def create(self, request, *args, **kwargs):
         # A listing needs its listing fee paid first (one paid fee = one listing). Staff/admin are exempt.
@@ -141,8 +198,24 @@ class PropertyViewSet(viewsets.ModelViewSet):
             fee.listing = property_instance
             fee.save(update_fields=['consumed', 'listing'])
 
+        self._save_media(property_instance, replacing=False)
+
+    def _save_media(self, instance, replacing=False):
+        """Photos, video, verification documents and amenities sent with a create or an edit.
+        On an edit: new photos are added, 'remove_image_ids' removes photos, a new document replaces
+        the old one, and 'amenities_list' (when sent) replaces the amenities."""
+        if replacing:
+            remove_ids = [x for x in str(self.request.data.get('remove_image_ids') or '').replace(' ', '').split(',') if x.isdigit()]
+            if remove_ids:
+                instance.images.filter(id__in=remove_ids).delete()
+            # Max 8 photos in total
+            room = max(0, 8 - instance.images.filter(is_video=False).exclude(image_url__contains='placehold.co').count())
+        else:
+            room = 8
         # 2. Upload images to Cloudinary (with fallback to default storage)
-        images = self.request.FILES.getlist('uploaded_images')
+        images = self.request.FILES.getlist('uploaded_images')[:room]
+        if replacing and images:
+            instance.images.filter(image_url__contains='placehold.co').delete()
         for image in images:
             full_image_url = None
             try:
@@ -164,17 +237,19 @@ class PropertyViewSet(viewsets.ModelViewSet):
                     print("Default storage image fallback note:", fe)
 
             if full_image_url:
-                ListingImage.objects.create(property=property_instance, image_url=full_image_url, is_video=False)
+                ListingImage.objects.create(property=instance, image_url=full_image_url, is_video=False)
 
-        if not property_instance.images.exists():
+        if not instance.images.exists():
             ListingImage.objects.create(
-                property=property_instance,
+                property=instance,
                 image_url='https://placehold.co/600x400?text=Property+Image',
                 is_video=False
             )
 
         # 3. Upload video to Cloudinary if provided
         video_file = self.request.FILES.get('uploaded_video')
+        if video_file and replacing:
+            instance.images.filter(is_video=True).delete()
         if video_file:
             full_video_url = None
             try:
@@ -196,7 +271,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
                     print("Default storage video fallback note:", fe)
 
             if full_video_url:
-                ListingImage.objects.create(property=property_instance, image_url=full_video_url, is_video=True)
+                ListingImage.objects.create(property=instance, image_url=full_video_url, is_video=True)
 
         # 4. Upload verification documents (Aadhaar, Electricity Bill, NOC) to Cloudinary
         for doc_field in ['document_aadhaar', 'document_electricity', 'document_noc']:
@@ -210,14 +285,16 @@ class PropertyViewSet(viewsets.ModelViewSet):
                     )
                     doc_url = upload_res.get('secure_url') or upload_res.get('url')
                     if doc_url:
-                        setattr(property_instance, doc_field, doc_url)
-                        property_instance.save(update_fields=[doc_field])
+                        setattr(instance, doc_field, doc_url)
+                        instance.save(update_fields=[doc_field])
                 except Exception as doc_err:
                     print(f"Cloudinary {doc_field} upload note:", doc_err)
 
-        # 5. Save Amenities
+        # Amenities
         try:
             amenities_str = self.request.data.get('amenities_list', '')
+            if replacing and 'amenities_list' in self.request.data:
+                instance.amenities.clear()
             if amenities_str:
                 if isinstance(amenities_str, list):
                     amenities_str = ','.join(amenities_str)
@@ -229,9 +306,10 @@ class PropertyViewSet(viewsets.ModelViewSet):
                 for name in amenity_names:
                     if name:
                         amenity_obj, _ = Amenity.objects.get_or_create(name=name)
-                        property_instance.amenities.add(amenity_obj)
+                        instance.amenities.add(amenity_obj)
         except Exception as e:
             print("Amenity save note:", e)
+
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def toggle_favorite(self, request, pk=None):
@@ -1082,3 +1160,48 @@ class VendorListingsView(APIView):
             'total_vendors': len(vendors),
             'total_listings': sum(x['count'] for x in vendors),
         }, status=status.HTTP_200_OK)
+
+
+class ListingEditsView(APIView):
+    """Admin / staff: owner edits of approved listings (the Notifications tab).
+    GET            -> open (not cleared) notifications, newest first. ?all=1 includes cleared ones.
+    POST {id}      -> clear one notification. POST {all: true} -> clear all.
+    Clearing only removes the notification; the listing is not changed."""
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request):
+        qs = ListingEdit.objects.select_related('property', 'editor').order_by('-created_at')
+        if request.query_params.get('all') != '1':
+            qs = qs.filter(cleared=False)
+        items = []
+        for e in qs[:300]:
+            p, u = e.property, e.editor
+            name = ''
+            if u:
+                name = (u.get_full_name() or u.first_name or u.username or '').strip()
+            items.append({
+                'id': e.id,
+                'property_id': str(p.id),
+                'property_title': p.title,
+                'property_type': p.property_type,
+                'property_status': p.status,
+                'editor_name': name or 'A user',
+                'editor_email': (u.email if u else '') or '',
+                'created_at': e.created_at,
+                'changes': e.changes,
+                'cleared': e.cleared,
+            })
+        return Response({'items': items, 'open_count': ListingEdit.objects.filter(cleared=False).count()})
+
+    def post(self, request):
+        qs = ListingEdit.objects.filter(cleared=False)
+        if str(request.data.get('all')).lower() in ('true', '1'):
+            pass
+        elif request.data.get('id'):
+            qs = qs.filter(id=request.data.get('id'))
+        elif request.data.get('property_id'):
+            qs = qs.filter(property_id=request.data.get('property_id'))
+        else:
+            return Response({'error': 'Nothing to clear.'}, status=status.HTTP_400_BAD_REQUEST)
+        n = qs.update(cleared=True, cleared_by=request.user, cleared_at=timezone.now())
+        return Response({'cleared': n, 'open_count': ListingEdit.objects.filter(cleared=False).count()})

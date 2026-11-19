@@ -63,6 +63,7 @@ urlpatterns = [
     path('site-theme/', SiteThemeView.as_view(), name='site-theme'),
     path('vendor-numbers/', VendorNumbersView.as_view(), name='vendor-numbers'),
     path('vendors/', views.VendorListingsView.as_view(), name='vendor-listings'),
+    path('listing-edits/', views.ListingEditsView.as_view(), name='listing-edits'),
     path('swipes/undo/', SwipeUndoView.as_view(), name='swipes-undo'),
     path('slot-machine/', SlotMachineView.as_view(), name='slot-machine'),
     path('swipes/', SwipesView.as_view(), name='swipes'),

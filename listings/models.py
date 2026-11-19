@@ -93,6 +93,11 @@ class Property(models.Model):
     # 👇 NEW: STAFF TRACKING FIELDS 👇
     reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_properties')
     reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    # Roommate questionnaire answers (only for property_type=ROOMMATE). See listings/roommate_form.py
+    roommate_details = models.JSONField(default=dict, blank=True)
+    # Last time the owner changed this listing after it was approved (shown to admin/staff only)
+    edited_at = models.DateTimeField(null=True, blank=True)
     
     def __str__(self):
         return f"{self.title} ({self.status})"
@@ -167,6 +172,25 @@ class HeroBannerAd(models.Model):
 
     def __str__(self):
         return self.text
+
+
+class ListingEdit(models.Model):
+    """One owner edit of an already-approved listing. Shown to admin/staff as a notification.
+    Clearing only hides the notification; the listing is not touched."""
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='edits')
+    editor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='listing_edits')
+    # [{"field": "phone_primary", "old": "...", "new": "..."}, ...]
+    changes = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    cleared = models.BooleanField(default=False)
+    cleared_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='cleared_listing_edits')
+    cleared_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Edit of {self.property_id} at {self.created_at}"
 
 
 class Purchase(models.Model):
