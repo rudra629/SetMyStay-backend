@@ -95,9 +95,19 @@ def minimum_plan_price(plan_name):
     cfg = PricingConfig.objects.filter(key='global_pricing').first()
     prices = (cfg.pricing_data if cfg and cfg.pricing_data else DEFAULT_PRICING).get('unlocks', {})
     full_price = float(prices.get(key) or DEFAULT_PRICING['unlocks'][key])
-    best_coupon = Coupon.objects.filter(is_active=True).order_by('-discount_percentage').first()
+    best_coupon = Coupon.objects.filter(is_active=True, scope=Coupon.Scope.PLANS).order_by('-discount_percentage').first()
     discount = min(max((best_coupon.discount_percentage if best_coupon else 0), 0), 90) / 100
     return full_price * (1 - discount)
+
+
+def minimum_listing_price(listing_type):
+    """Lowest valid listing fee for a type: admin price minus the best active listing coupon."""
+    cfg = PricingConfig.objects.filter(key='global_pricing').first()
+    prices = (cfg.pricing_data if cfg and cfg.pricing_data else DEFAULT_PRICING).get('listings', {}) or {}
+    full = float(prices.get(listing_type) or (DEFAULT_PRICING.get('listings') or {}).get(listing_type) or 0)
+    best = Coupon.objects.filter(is_active=True, scope=Coupon.Scope.LISTINGS).order_by('-discount_percentage').first()
+    discount = min(max((best.discount_percentage if best else 0), 0), 90) / 100
+    return full * (1 - discount)
 
 
 def get_razorpay_client():
@@ -179,7 +189,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
             cfg = PricingConfig.objects.filter(key='global_pricing').first()
             prices = (cfg.pricing_data if cfg and cfg.pricing_data else DEFAULT_PRICING).get('listings', {}) or {}
             full = float(prices.get(key) or (DEFAULT_PRICING.get('listings') or {}).get(key) or 0)
-            best = Coupon.objects.filter(is_active=True).order_by('-discount_percentage').first()
+            best = Coupon.objects.filter(is_active=True, scope=Coupon.Scope.LISTINGS).order_by('-discount_percentage').first()
             discount = min(max((best.discount_percentage if best else 0), 0), 90) / 100
             fees = fees.filter(amount__gte=max(0, full * (1 - discount) - 1))
         payment_id = str(request.data.get('payment_id') or '').strip()
@@ -548,6 +558,11 @@ class CreateRazorpayOrderView(APIView):
             # Unlock plans: the price must match the admin's pricing (minus at most the best active coupon)
             if pricing_key_for_plan(plan_name) and parsed_amount + 1 < minimum_plan_price(plan_name):
                 return Response({"error": "Amount does not match the plan price"}, status=status.HTTP_400_BAD_REQUEST)
+            # Listing fees: when the listing type is sent, the price must match it (minus at most the best listing coupon)
+            listing_type = str(request.data.get("listing_type") or "").strip().lower()
+            if 'listing' in str(plan_name).lower() and listing_type in ('pg', 'rental', 'roommate'):
+                if parsed_amount + 1 < minimum_listing_price(listing_type):
+                    return Response({"error": "Amount does not match the listing fee"}, status=status.HTTP_400_BAD_REQUEST)
 
             client = get_razorpay_client()
             user_id_str = str(request.user.id) if (request.user and request.user.is_authenticated) else ""

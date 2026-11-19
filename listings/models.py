@@ -138,9 +138,15 @@ class RoommateProfile(models.Model):
         return f"Roommate: {self.user.username}"
     
 class Coupon(models.Model):
+    class Scope(models.TextChoices):
+        PLANS = 'plans', 'Unlock plans'
+        LISTINGS = 'listings', 'Listing fees'
+
     code = models.CharField(max_length=20, unique=True)
     discount_percentage = models.IntegerField()
     is_active = models.BooleanField(default=True)
+    # What the coupon can be used for: unlock plans or listing fees (never both)
+    scope = models.CharField(max_length=10, choices=Scope.choices, default=Scope.PLANS)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

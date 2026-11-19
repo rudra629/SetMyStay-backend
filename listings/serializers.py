@@ -151,7 +151,7 @@ class RoommateProfileSerializer(serializers.ModelSerializer):
 class CouponSerializer(serializers.ModelSerializer):
     class Meta:
         model = Coupon
-        fields = ['id', 'code', 'discount_percentage', 'is_active', 'created_at']
+        fields = ['id', 'code', 'discount_percentage', 'is_active', 'scope', 'created_at']
 
 class AdvertisementSerializer(serializers.ModelSerializer):
     # Sends the URL to Next.js (Read Only)
