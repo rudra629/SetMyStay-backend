@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import Property, Amenity, ListingImage, RoommateProfile, Coupon, Advertisement # Make sure to import them!
 from django.contrib.auth.models import User
-from .models import Purchase
+from .models import Purchase, HeroBannerAd
 # 1. Image Serializer
 class ListingImageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -149,3 +149,10 @@ class PurchaseSerializer(serializers.ModelSerializer):
         if obj.user and '@' in obj.user.username:
             return obj.user.username
         return ''
+
+
+class HeroBannerAdSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HeroBannerAd
+        fields = ['id', 'text', 'link_url', 'image_url', 'is_active', 'sort_order', 'created_at']
+        read_only_fields = ['id', 'image_url', 'created_at']

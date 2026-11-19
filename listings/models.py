@@ -153,6 +153,22 @@ class Advertisement(models.Model):
     def __str__(self):
         return self.title
 
+class HeroBannerAd(models.Model):
+    """Ads shown in the moving banner on the home page hero (managed in Admin > Management)."""
+    text = models.CharField(max_length=140)
+    link_url = models.URLField(max_length=500, blank=True, default='')
+    image_url = models.URLField(max_length=500, blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sort_order', '-created_at']
+
+    def __str__(self):
+        return self.text
+
+
 class Purchase(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='purchases')
     plan_name = models.CharField(max_length=150)

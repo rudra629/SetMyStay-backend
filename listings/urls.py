@@ -36,6 +36,7 @@ router.register(r'amenities', views.AmenityViewSet, basename='amenity')
 router.register(r'staff', views.StaffViewSet, basename='staff')
 router.register(r'coupons', views.CouponViewSet, basename='coupon')
 router.register(r'advertisements', views.AdvertisementViewSet, basename='advertisement')
+router.register(r'hero-ads', views.HeroBannerAdViewSet, basename='hero-ad')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -61,6 +62,7 @@ urlpatterns = [
     path('site-contact/', SiteContactView.as_view(), name='site-contact'),
     path('site-theme/', SiteThemeView.as_view(), name='site-theme'),
     path('vendor-numbers/', VendorNumbersView.as_view(), name='vendor-numbers'),
+    path('vendors/', views.VendorListingsView.as_view(), name='vendor-listings'),
     path('swipes/undo/', SwipeUndoView.as_view(), name='swipes-undo'),
     path('slot-machine/', SlotMachineView.as_view(), name='slot-machine'),
     path('swipes/', SwipesView.as_view(), name='swipes'),

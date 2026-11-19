@@ -12,6 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, filters, permissions, parsers, generics, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -27,7 +28,8 @@ from .models import (
     PricingConfig,
     UserUnlock,
     SwipeUsage,
-    SlotSpin
+    SlotSpin,
+    HeroBannerAd,
 )
 from .permissions import (
     IsStaffOrAdmin, IsSuperAdmin, ReadOnlyOrSuperAdmin, ReadOnlyOrStaff, IsOwnerOrStaff, is_staff_user,
@@ -41,6 +43,7 @@ from .serializers import (
     AdvertisementSerializer,
     PurchaseSerializer,
     StaffSerializer,
+    HeroBannerAdSerializer,
 )
 
 
@@ -1003,3 +1006,79 @@ class MyFavoritesView(APIView):
     def get(self, request):
         ids = [str(i) for i in request.user.favorite_properties.values_list('id', flat=True)]
         return Response({'ids': ids}, status=status.HTTP_200_OK)
+
+
+class HeroBannerAdViewSet(viewsets.ModelViewSet):
+    """Moving ad banner on the home hero.
+    GET (anyone): active ads only; the main admin gets all with ?all=1.
+    POST / PATCH / DELETE: main admin only. Optional 'image' file upload."""
+    serializer_class = HeroBannerAdSerializer
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+    permission_classes = [ReadOnlyOrSuperAdmin]
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = HeroBannerAd.objects.all()
+        if self.request.query_params.get('all') == '1' and getattr(self.request.user, 'is_superuser', False):
+            return qs
+        return qs.filter(is_active=True)
+
+    def _upload(self):
+        f = self.request.FILES.get('image')
+        if not f:
+            return None
+        if f.size > 5 * 1024 * 1024:
+            raise ValidationError({'image': 'Image must be under 5 MB.'})
+        if not (f.content_type or '').startswith('image/'):
+            raise ValidationError({'image': 'Please upload an image file.'})
+        if getattr(settings, 'CLOUDINARY_CLOUD_NAME', None) and getattr(settings, 'CLOUDINARY_API_KEY', None):
+            try:
+                res = cloudinary.uploader.upload(f, folder="setmystay/hero-ads", resource_type="image")
+                return res.get('secure_url') or res.get('url')
+            except Exception as e:  # fall back to default storage
+                print("Hero ad upload fell back to default storage:", e)
+        name = default_storage.save(f"hero-ads/{f.name}", f)
+        url = default_storage.url(name)
+        return self.request.build_absolute_uri(url) if url.startswith('/') else url
+
+    def perform_create(self, serializer):
+        url = self._upload()
+        serializer.save(**({'image_url': url} if url else {}))
+
+    def perform_update(self, serializer):
+        url = self._upload()
+        if self.request.data.get('remove_image') in ('1', 'true', True):
+            url = ''
+        serializer.save(**({'image_url': url} if url is not None else {}))
+
+
+class VendorListingsView(APIView):
+    """Admin / staff only: every vendor number with how many listings use it, and those listings.
+    ?q=<text> filters vendor numbers (case-insensitive contains)."""
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request):
+        q = str(request.query_params.get('q') or '').strip()
+        props = Property.objects.exclude(vendor_number__isnull=True).exclude(vendor_number='')
+        if q:
+            props = props.filter(vendor_number__icontains=q)
+        groups = {}
+        for p in props.order_by('-id').only('id', 'title', 'property_type', 'status', 'city', 'area', 'vendor_number', 'created_at'):
+            key = p.vendor_number.strip()
+            groups.setdefault(key, []).append({
+                'id': str(p.id), 'title': p.title, 'type': p.property_type, 'status': p.status,
+                'city': p.city or '', 'area': p.area or '',
+            })
+        # Vendor numbers created in the admin panel that no listing uses yet
+        for n in VendorNumbersView._numbers():
+            if n not in groups and (not q or q.lower() in n.lower()):
+                groups[n] = []
+        vendors = sorted(
+            ({'vendor_number': k, 'count': len(v), 'listings': v} for k, v in groups.items()),
+            key=lambda x: (-x['count'], x['vendor_number'].lower()),
+        )
+        return Response({
+            'vendors': vendors,
+            'total_vendors': len(vendors),
+            'total_listings': sum(x['count'] for x in vendors),
+        }, status=status.HTTP_200_OK)
